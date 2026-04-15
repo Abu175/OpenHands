@@ -19,12 +19,14 @@ from openhands.app_server.app_conversation.app_conversation_models import (
 )
 from openhands.app_server.app_conversation.sql_app_conversation_info_service import (
     SQLAppConversationInfoService,
+    StoredConversationMetadata,
 )
 from openhands.app_server.user.specifiy_user_context import SpecifyUserContext
 from openhands.app_server.utils.sql_utils import Base
 from openhands.integrations.service_types import ProviderType
+from openhands.sdk.conversation.conversation_stats import ConversationStats
 from openhands.sdk.llm import MetricsSnapshot
-from openhands.sdk.llm.utils.metrics import TokenUsage
+from openhands.sdk.llm.utils.metrics import Metrics, TokenUsage
 from openhands.storage.data_models.conversation_metadata import ConversationTrigger
 
 # Note: org_id column exists but foreign key constraint is not enforced in tests
@@ -1242,3 +1244,173 @@ class TestSandboxIdFilter:
             sandbox_id__eq='sandbox_time_test', created_at__gte=cutoff
         )
         assert count == 2
+
+
+class TestAccumulatedCostPreservation:
+    """Test that accumulated_cost and other metrics are preserved on conversation update."""
+
+    @pytest.mark.asyncio
+    async def test_save_app_conversation_info_preserves_metrics_on_update(
+        self,
+        service: SQLAppConversationInfoService,
+        async_session: AsyncSession,
+    ):
+        """Test that save_app_conversation_info preserves metrics when updating an existing record.
+
+        This test verifies the fix for a race condition where calling save_app_conversation_info
+        with stale metrics would overwrite the accumulated_cost set by update_conversation_statistics.
+        """
+        conversation_id = uuid4()
+
+        # Step 1: Create initial conversation with some initial metrics
+        initial_info = AppConversationInfo(
+            id=conversation_id,
+            sandbox_id='sandbox_test',
+            created_by_user_id='user_123',
+            title='Test Conversation',
+            metrics=MetricsSnapshot(
+                accumulated_cost=0.5,
+                accumulated_token_usage=TokenUsage(prompt_tokens=100),
+            ),
+        )
+        await service.save_app_conversation_info(initial_info)
+
+        # Step 2: Simulate update_conversation_statistics being called with new cost
+        # This is what happens when a stats event comes in from the agent-server
+        stats = ConversationStats()
+        stats.usage_to_metrics['agent'] = Metrics(
+            model_name='test-model',
+            accumulated_cost=1.5,
+            accumulated_token_usage=TokenUsage(prompt_tokens=200),
+        )
+        await service.update_conversation_statistics(conversation_id, stats)
+
+        # Verify cost was updated
+        from sqlalchemy import select
+
+        result = await async_session.execute(
+            select(StoredConversationMetadata).where(
+                StoredConversationMetadata.conversation_id == str(conversation_id)
+            )
+        )
+        stored = result.scalar_one()
+        assert stored.accumulated_cost == 1.5, (
+            f'Expected 1.5 after update_conversation_statistics, got {stored.accumulated_cost}'
+        )
+
+        # Step 3: Call save_app_conversation_info again with stale metrics
+        # This simulates on_conversation_update webhook being called with stale data
+        stale_info = AppConversationInfo(
+            id=conversation_id,
+            sandbox_id='sandbox_test',
+            created_by_user_id='user_123',
+            title='Updated Title',  # Title should update
+            metrics=MetricsSnapshot(
+                accumulated_cost=0.8,  # STALE value - should NOT overwrite!
+                accumulated_token_usage=TokenUsage(prompt_tokens=150),
+            ),
+        )
+        await service.save_app_conversation_info(stale_info)
+
+        # Verify metrics were NOT overwritten but title WAS updated
+        await async_session.refresh(stored)
+        assert stored.accumulated_cost == 1.5, (
+            f'accumulated_cost was overwritten from 1.5 to {stored.accumulated_cost}'
+        )
+        assert stored.title == 'Updated Title', (
+            f'Title was not updated, got {stored.title}'
+        )
+        assert stored.prompt_tokens == 200, (
+            f'prompt_tokens was overwritten to {stored.prompt_tokens}'
+        )
+
+    @pytest.mark.asyncio
+    async def test_save_app_conversation_info_sets_metrics_on_create(
+        self,
+        service: SQLAppConversationInfoService,
+        async_session: AsyncSession,
+    ):
+        """Test that save_app_conversation_info sets metrics when creating a new record."""
+        conversation_id = uuid4()
+
+        # Create new conversation with metrics
+        info = AppConversationInfo(
+            id=conversation_id,
+            sandbox_id='sandbox_new',
+            created_by_user_id='user_456',
+            title='New Conversation',
+            metrics=MetricsSnapshot(
+                accumulated_cost=0.75,
+                accumulated_token_usage=TokenUsage(
+                    prompt_tokens=500, completion_tokens=250
+                ),
+            ),
+        )
+        await service.save_app_conversation_info(info)
+
+        # Verify metrics were set on creation
+        from sqlalchemy import select
+
+        result = await async_session.execute(
+            select(StoredConversationMetadata).where(
+                StoredConversationMetadata.conversation_id == str(conversation_id)
+            )
+        )
+        stored = result.scalar_one()
+        assert stored.accumulated_cost == 0.75
+        assert stored.prompt_tokens == 500
+        assert stored.completion_tokens == 250
+        assert stored.title == 'New Conversation'
+
+    @pytest.mark.asyncio
+    async def test_non_metrics_fields_still_update(
+        self,
+        service: SQLAppConversationInfoService,
+        async_session: AsyncSession,
+    ):
+        """Test that non-metrics fields still get updated properly."""
+        from sqlalchemy import select
+
+        conversation_id = uuid4()
+
+        # Create initial conversation
+        initial_info = AppConversationInfo(
+            id=conversation_id,
+            sandbox_id='sandbox_fields',
+            created_by_user_id='user_789',
+            title='Initial Title',
+            selected_repository='https://github.com/old/repo',
+            selected_branch='main',
+            git_provider=ProviderType.GITHUB,
+            llm_model='gpt-3.5-turbo',
+            public=False,
+        )
+        await service.save_app_conversation_info(initial_info)
+
+        # Update with new non-metrics fields
+        updated_info = AppConversationInfo(
+            id=conversation_id,
+            sandbox_id='sandbox_fields',
+            created_by_user_id='user_789',
+            title='Updated Title',
+            selected_repository='https://github.com/new/repo',
+            selected_branch='develop',
+            git_provider=ProviderType.GITLAB,
+            llm_model='gpt-4',
+            public=True,
+        )
+        await service.save_app_conversation_info(updated_info)
+
+        # Verify all non-metrics fields were updated
+        result = await async_session.execute(
+            select(StoredConversationMetadata).where(
+                StoredConversationMetadata.conversation_id == str(conversation_id)
+            )
+        )
+        stored = result.scalar_one()
+        assert stored.title == 'Updated Title'
+        assert stored.selected_repository == 'https://github.com/new/repo'
+        assert stored.selected_branch == 'develop'
+        assert stored.git_provider == 'gitlab'
+        assert stored.llm_model == 'gpt-4'
+        assert stored.public is True
