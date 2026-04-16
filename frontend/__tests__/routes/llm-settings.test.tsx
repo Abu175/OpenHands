@@ -718,7 +718,7 @@ describe("LlmSettingsScreen", () => {
     });
   });
 
-  it("clears hidden search API key state when saving basic view", async () => {
+  it("preserves hidden search API key state when saving basic view", async () => {
     let persistedSettings = buildSettingsWithAdvancedToggle({
       llm_model: "openai/gpt-4o",
       search_api_key: "tavily-key",
@@ -770,15 +770,18 @@ describe("LlmSettingsScreen", () => {
     await userEvent.click(screen.getByTestId("save-button"));
 
     await waitFor(() => {
-      expect(saveSettingsSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          search_api_key: "",
-          agent_settings: expect.objectContaining({
-            llm: expect.objectContaining({ api_key: "test-api-key" }),
-          }),
-        }),
-      );
+      expect(saveSettingsSpy).toHaveBeenCalled();
     });
+
+    const payload = saveSettingsSpy.mock.calls[0][0];
+    expect(payload).not.toHaveProperty("search_api_key");
+    expect(payload).toEqual(
+      expect.objectContaining({
+        agent_settings: expect.objectContaining({
+          llm: expect.objectContaining({ api_key: "test-api-key" }),
+        }),
+      }),
+    );
 
     await waitFor(() => {
       expect(getSettingsSpy).toHaveBeenCalledTimes(2);
@@ -790,6 +793,44 @@ describe("LlmSettingsScreen", () => {
         screen.queryByTestId("llm-settings-form-advanced"),
       ).not.toBeInTheDocument();
     });
+  });
+
+  it("does not include mcp_config when saving basic LLM settings", async () => {
+    const persistedSettings = buildSettingsWithAdvancedToggle({
+      llm_model: "openai/gpt-4o",
+      agent_settings: {
+        llm: {
+          model: "openai/gpt-4o",
+        },
+        mcp_config: {
+          sse_servers: [{ url: "https://example.com/sse" }],
+          stdio_servers: [],
+          shttp_servers: [],
+        },
+      },
+    });
+
+    vi.spyOn(SettingsService, "getSettings").mockResolvedValue(
+      structuredClone(persistedSettings),
+    );
+    const saveSettingsSpy = vi
+      .spyOn(SettingsService, "saveSettings")
+      .mockResolvedValue(true);
+
+    renderLlmSettingsScreen({ appMode: "oss" });
+
+    await screen.findByTestId("llm-settings-form-basic");
+
+    const apiKeyInput = await screen.findByTestId("llm-api-key-input");
+    await userEvent.type(apiKeyInput, "test-api-key");
+    await userEvent.click(screen.getByTestId("save-button"));
+
+    await waitFor(() => {
+      expect(saveSettingsSpy).toHaveBeenCalled();
+    });
+
+    const payload = saveSettingsSpy.mock.calls[0][0];
+    expect(payload.agent_settings).not.toHaveProperty("mcp_config");
   });
 
   it("keeps the basic view after save on SaaS personal settings when an inherited org search API key remains set on refetch", async () => {

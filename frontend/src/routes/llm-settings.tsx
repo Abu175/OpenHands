@@ -462,6 +462,8 @@ export function LlmSettingsScreen({
       const agentSettings = structuredClone(basePayload);
       const topLevel: Record<string, unknown> = {};
 
+      delete (agentSettings as Record<string, unknown>).mcp_config;
+
       if (!isSaasMode && searchApiKeyDirty) {
         topLevel.search_api_key = searchApiKey.trim();
       }
@@ -489,10 +491,6 @@ export function LlmSettingsScreen({
       if (context.view === "basic") {
         llm.base_url = getSchemaFieldDefaultValue(schema, "llm.base_url");
         agentSettings.llm = llm;
-
-        if (!isSaasMode) {
-          topLevel.search_api_key = DEFAULT_SETTINGS.search_api_key;
-        }
 
         if (hasAgentField) {
           agentSettings.agent = getSchemaFieldDefaultValue(schema, "agent");
