@@ -2057,7 +2057,21 @@
     "ca": "Desa els canvis"
   },
   "SETTINGS$CONFIRM_RESET_HIDDEN_FIELDS": {
-    "en": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?"
+    "en": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?",
+    "ja": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?",
+    "zh-CN": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?",
+    "zh-TW": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?",
+    "ko-KR": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?",
+    "no": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?",
+    "it": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?",
+    "pt": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?",
+    "es": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?",
+    "ar": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?",
+    "fr": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?",
+    "tr": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?",
+    "de": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?",
+    "uk": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?",
+    "ca": "Saving from this view will reset {{count}} hidden setting(s) to their default values. Continue?"
   },
   "SETTINGS$SDK_SCHEMA_UNAVAILABLE": {
     "en": "SDK settings schema unavailable.",

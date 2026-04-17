@@ -622,7 +622,7 @@ describe("LlmSettingsScreen", () => {
     });
   });
 
-  it("omits hidden schema-driven advanced and all settings when saving basic view", async () => {
+  it("resets hidden schema-driven advanced and all settings after save confirmation", async () => {
     const schema = structuredClone(
       MOCK_DEFAULT_USER_SETTINGS.agent_settings_schema!,
     );
@@ -702,6 +702,11 @@ describe("LlmSettingsScreen", () => {
     await userEvent.type(apiKeyInput, "test-api-key");
     await userEvent.click(screen.getByTestId("save-button"));
 
+    expect(saveSettingsSpy).not.toHaveBeenCalled();
+    expect(await screen.findByTestId("confirmation-modal")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("confirm-button"));
+
     await waitFor(() => {
       expect(saveSettingsSpy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -721,7 +726,9 @@ describe("LlmSettingsScreen", () => {
         llm?: Record<string, unknown>;
       };
     };
-    expect(payload.agent_settings?.llm).not.toHaveProperty("timeout");
+    expect(payload.agent_settings?.llm).toEqual(
+      expect.objectContaining({ timeout: 30 }),
+    );
   });
 
   it("preserves hidden search API key state when saving basic view", async () => {
