@@ -81,7 +81,7 @@ from openhands.runtime.utils.bash import BashSession
 from openhands.runtime.utils.files import insert_lines, read_lines
 from openhands.runtime.utils.memory_monitor import MemoryMonitor
 from openhands.runtime.utils.runtime_init import init_user_and_working_directory
-from openhands.utils._redact_compat import redact_text_secrets
+from openhands.utils._redact_compat import redact_text_secrets, sanitize_config
 from openhands.utils.async_utils import call_sync_from_async, wait_all
 
 if sys.platform == 'win32':
@@ -871,7 +871,8 @@ if __name__ == '__main__':
                 status_code=400, detail='Request must be a list of MCP tools to sync'
             )
         logger.info(
-            f'Updating MCP server with tools: {redact_text_secrets(str(mcp_tools_to_sync))}'
+            f'Updating MCP server with tools: '
+            f'{[sanitize_config(t) if isinstance(t, dict) else redact_text_secrets(str(t)) for t in mcp_tools_to_sync]}'
         )
         mcp_tools_to_sync = [StdioMCPServer(**tool) for tool in mcp_tools_to_sync]
         try:

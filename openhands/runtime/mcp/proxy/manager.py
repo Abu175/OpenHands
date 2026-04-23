@@ -21,6 +21,7 @@ from fastmcp.server.auth import StaticTokenVerifier
 from fastmcp.utilities.logging import get_logger as fastmcp_get_logger
 
 from openhands.core.config.mcp_config import StdioMCPServer
+from openhands.utils._redact_compat import sanitize_config
 
 logger = logging.getLogger(__name__)
 fastmcp_logger = fastmcp_get_logger('fastmcp')
@@ -153,6 +154,10 @@ class MCPProxyManager:
             name = dump.pop('name', None) or t.command
             tools[name] = dump
         self.config['mcpServers'] = tools
+        logger.info(
+            f'MCP Proxy config updated with {len(tools)} servers: '
+            f'{sanitize_config(self.config)}'
+        )
 
         del self.proxy
         self.proxy = None

@@ -39,6 +39,7 @@ from openhands.runtime.utils.command import (
 )
 from openhands.runtime.utils.request import send_request
 from openhands.runtime.utils.runtime_build import build_runtime_image
+from openhands.utils._redact_compat import redact_text_secrets
 from openhands.utils.async_utils import call_sync_from_async
 from openhands.utils.tenacity_stop import stop_base, stop_if_should_exit
 
@@ -245,7 +246,7 @@ class RemoteRuntime(ActionExecutionClient):
             return False
 
     def _build_runtime(self) -> None:
-        self.log('debug', f'Building RemoteRuntime config:\n{self.config}')
+        self.log('debug', f'Building RemoteRuntime config:\n{redact_text_secrets(str(self.config))}')
         self.set_runtime_status(RuntimeStatus.BUILDING_RUNTIME)
         response = self._send_runtime_api_request(
             'GET',

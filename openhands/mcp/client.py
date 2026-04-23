@@ -15,6 +15,7 @@ from openhands.core.config.mcp_config import RemoteMCPServer, StdioMCPServer
 from openhands.core.logger import openhands_logger as logger
 from openhands.mcp.error_collector import mcp_error_collector
 from openhands.mcp.tool import MCPClientTool
+from openhands.utils._redact_compat import redact_url_params
 
 
 class MCPClient(BaseModel):
@@ -99,10 +100,11 @@ class MCPClient(BaseModel):
 
             await self._initialize_and_list_tools()
         except McpError as e:
-            error_msg = f'McpError connecting to {server_url}: {e}'
+            safe_url = redact_url_params(server_url)
+            error_msg = f'McpError connecting to {safe_url}: {e}'
             logger.error(error_msg)
             mcp_error_collector.add_error(
-                server_name=server_url,
+                server_name=safe_url,
                 server_type=transport_type,
                 error_message=error_msg,
                 exception_details=str(e),
@@ -110,10 +112,11 @@ class MCPClient(BaseModel):
             raise
 
         except Exception as e:
-            error_msg = f'Error connecting to {server_url}: {e}'
+            safe_url = redact_url_params(server_url)
+            error_msg = f'Error connecting to {safe_url}: {e}'
             logger.error(error_msg)
             mcp_error_collector.add_error(
-                server_name=server_url,
+                server_name=safe_url,
                 server_type=transport_type,
                 error_message=error_msg,
                 exception_details=str(e),
