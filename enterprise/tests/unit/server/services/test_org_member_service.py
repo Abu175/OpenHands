@@ -7,6 +7,7 @@ import pytest
 from pydantic import SecretStr
 from server.routes.org_models import (
     CannotModifySelfError,
+    InsufficientPermissionError,
     InvalidRoleError,
     LastOwnerError,
     MeResponse,
@@ -16,6 +17,7 @@ from server.routes.org_models import (
     RoleNotFoundError,
 )
 from server.services.org_member_service import OrgMemberService
+from storage.org import Org
 from storage.org_member import OrgMember
 from storage.role import Role
 from storage.user import User
@@ -2363,3 +2365,396 @@ class TestOrgMemberServiceGetMe:
 
             # Assert
             assert result.email == ''
+
+
+class TestOrgMemberServiceConcurrencyLimits:
+    """Test cases for OrgMemberService concurrency limits functionality.
+
+    Tests the max_concurrent_sandboxes feature including:
+    - MeResponse including effective_max_concurrent_sandboxes
+    - OrgMemberResponse including effective_max_concurrent_sandboxes
+    - OrgMemberUpdate handling max_concurrent_sandboxes_override
+    - Limit resolution order: member override → org default → global fallback
+    """
+
+    @pytest.fixture
+    def mock_org(self, org_id):
+        """Create a mock organization with max_concurrent_sandboxes."""
+        org = MagicMock(spec=Org)
+        org.id = org_id
+        org.max_concurrent_sandboxes = 5
+        return org
+
+    @pytest.fixture
+    def mock_org_member_with_override(self, org_id, current_user_id):
+        """Create a mock OrgMember with max_concurrent_sandboxes_override."""
+        member = MagicMock(spec=OrgMember)
+        member.org_id = org_id
+        member.user_id = current_user_id
+        member.role_id = 1
+        member.llm_api_key = SecretStr('sk-test-key-12345')
+        member.llm_api_key_for_byor = None
+        member.agent_settings_diff = {}
+        member.conversation_settings_diff = {}
+        member.status = 'active'
+        member.max_concurrent_sandboxes_override = 10
+        return member
+
+    @pytest.fixture
+    def mock_org_member_no_override(self, org_id, current_user_id):
+        """Create a mock OrgMember without max_concurrent_sandboxes_override."""
+        member = MagicMock(spec=OrgMember)
+        member.org_id = org_id
+        member.user_id = current_user_id
+        member.role_id = 1
+        member.llm_api_key = SecretStr('sk-test-key-12345')
+        member.llm_api_key_for_byor = None
+        member.agent_settings_diff = {}
+        member.conversation_settings_diff = {}
+        member.status = 'active'
+        member.max_concurrent_sandboxes_override = None
+        return member
+
+    @pytest.fixture
+    def mock_user(self, current_user_id):
+        """Create a mock User."""
+        user = MagicMock(spec=User)
+        user.id = current_user_id
+        user.email = 'test@example.com'
+        return user
+
+    @pytest.mark.asyncio
+    async def test_get_me_with_member_override_returns_override_as_effective(
+        self,
+        org_id,
+        current_user_id,
+        mock_org_member_with_override,
+        mock_user,
+        mock_org,
+        owner_role,
+    ):
+        """GIVEN: Member has max_concurrent_sandboxes_override set
+        WHEN: get_me is called
+        THEN: effective_max_concurrent_sandboxes equals member override
+        """
+        with (
+            patch(
+                'server.services.org_member_service.OrgMemberStore.get_org_member',
+                new_callable=AsyncMock,
+            ) as mock_get_member,
+            patch(
+                'server.services.org_member_service.RoleStore.get_role_by_id',
+                new_callable=AsyncMock,
+            ) as mock_get_role,
+            patch(
+                'server.services.org_member_service.UserStore.get_user_by_id',
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+            patch(
+                'server.services.org_member_service.OrgStore.get_org_by_id',
+                new_callable=AsyncMock,
+            ) as mock_get_org,
+        ):
+            mock_get_member.return_value = mock_org_member_with_override
+            mock_get_role.return_value = owner_role
+            mock_get_user.return_value = mock_user
+            mock_get_org.return_value = mock_org
+
+            result = await OrgMemberService.get_me(org_id, current_user_id)
+
+            assert isinstance(result, MeResponse)
+            assert result.max_concurrent_sandboxes_override == 10
+            assert result.effective_max_concurrent_sandboxes == 10
+
+    @pytest.mark.asyncio
+    async def test_get_me_without_member_override_uses_org_default(
+        self,
+        org_id,
+        current_user_id,
+        mock_org_member_no_override,
+        mock_user,
+        mock_org,
+        owner_role,
+    ):
+        """GIVEN: Member has no max_concurrent_sandboxes_override
+        WHEN: get_me is called
+        THEN: effective_max_concurrent_sandboxes equals org default
+        """
+        with (
+            patch(
+                'server.services.org_member_service.OrgMemberStore.get_org_member',
+                new_callable=AsyncMock,
+            ) as mock_get_member,
+            patch(
+                'server.services.org_member_service.RoleStore.get_role_by_id',
+                new_callable=AsyncMock,
+            ) as mock_get_role,
+            patch(
+                'server.services.org_member_service.UserStore.get_user_by_id',
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+            patch(
+                'server.services.org_member_service.OrgStore.get_org_by_id',
+                new_callable=AsyncMock,
+            ) as mock_get_org,
+        ):
+            mock_get_member.return_value = mock_org_member_no_override
+            mock_get_role.return_value = owner_role
+            mock_get_user.return_value = mock_user
+            mock_get_org.return_value = mock_org
+
+            result = await OrgMemberService.get_me(org_id, current_user_id)
+
+            assert isinstance(result, MeResponse)
+            assert result.max_concurrent_sandboxes_override is None
+            assert result.effective_max_concurrent_sandboxes == 5  # org default
+
+    @pytest.mark.asyncio
+    async def test_get_me_without_org_uses_fallback(
+        self,
+        org_id,
+        current_user_id,
+        mock_org_member_no_override,
+        mock_user,
+        owner_role,
+    ):
+        """GIVEN: Org lookup returns None
+        WHEN: get_me is called
+        THEN: effective_max_concurrent_sandboxes uses fallback (3)
+        """
+        with (
+            patch(
+                'server.services.org_member_service.OrgMemberStore.get_org_member',
+                new_callable=AsyncMock,
+            ) as mock_get_member,
+            patch(
+                'server.services.org_member_service.RoleStore.get_role_by_id',
+                new_callable=AsyncMock,
+            ) as mock_get_role,
+            patch(
+                'server.services.org_member_service.UserStore.get_user_by_id',
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+            patch(
+                'server.services.org_member_service.OrgStore.get_org_by_id',
+                new_callable=AsyncMock,
+            ) as mock_get_org,
+        ):
+            mock_get_member.return_value = mock_org_member_no_override
+            mock_get_role.return_value = owner_role
+            mock_get_user.return_value = mock_user
+            mock_get_org.return_value = None
+
+            result = await OrgMemberService.get_me(org_id, current_user_id)
+
+            assert result.max_concurrent_sandboxes_override is None
+            assert result.effective_max_concurrent_sandboxes == 3  # fallback
+
+    @pytest.mark.asyncio
+    async def test_get_org_members_returns_effective_limits(
+        self,
+        org_id,
+        current_user_id,
+        target_user_id,
+        mock_org,
+        owner_role,
+        member_role,
+    ):
+        """GIVEN: Org with members having different override settings
+        WHEN: get_org_members is called
+        THEN: Each member has correct effective_max_concurrent_sandboxes
+        """
+        # Create mock members with different override settings
+        mock_member_with_override = MagicMock(spec=OrgMember)
+        mock_member_with_override.org_id = org_id
+        mock_member_with_override.user_id = target_user_id
+        mock_member_with_override.role_id = member_role.id
+        mock_member_with_override.status = 'active'
+        mock_member_with_override.max_concurrent_sandboxes_override = 15
+        mock_member_with_override.user = MagicMock()
+        mock_member_with_override.user.email = 'user@example.com'
+        mock_member_with_override.role = member_role
+
+        mock_member_no_override = MagicMock(spec=OrgMember)
+        mock_member_no_override.org_id = org_id
+        mock_member_no_override.user_id = current_user_id
+        mock_member_no_override.role_id = owner_role.id
+        mock_member_no_override.status = 'active'
+        mock_member_no_override.max_concurrent_sandboxes_override = None
+        mock_member_no_override.user = MagicMock()
+        mock_member_no_override.user.email = 'owner@example.com'
+        mock_member_no_override.role = owner_role
+
+        with (
+            patch(
+                'server.services.org_member_service.OrgMemberStore.get_org_member',
+                new_callable=AsyncMock,
+            ) as mock_get_member,
+            patch(
+                'server.services.org_member_service.OrgStore.get_org_by_id',
+                new_callable=AsyncMock,
+            ) as mock_get_org,
+            patch(
+                'server.services.org_member_service.OrgMemberStore.get_org_members_paginated',
+                new_callable=AsyncMock,
+            ) as mock_get_paginated,
+        ):
+            mock_get_member.return_value = mock_member_no_override
+            mock_get_org.return_value = mock_org
+            mock_get_paginated.return_value = (
+                [mock_member_with_override, mock_member_no_override],
+                False,
+            )
+
+            success, error_code, data = await OrgMemberService.get_org_members(
+                org_id=org_id,
+                current_user_id=current_user_id,
+                page_id=None,
+                limit=10,
+            )
+
+            assert success is True
+            assert error_code is None
+            assert data is not None
+            assert len(data.items) == 2
+
+            # Member with override
+            member_with_override = data.items[0]
+            assert member_with_override.max_concurrent_sandboxes_override == 15
+            assert member_with_override.effective_max_concurrent_sandboxes == 15
+
+            # Member without override (uses org default)
+            member_no_override = data.items[1]
+            assert member_no_override.max_concurrent_sandboxes_override is None
+            assert member_no_override.effective_max_concurrent_sandboxes == 5
+
+    @pytest.mark.asyncio
+    async def test_update_org_member_owner_can_update_sandbox_override(
+        self,
+        org_id,
+        current_user_id,
+        target_user_id,
+        owner_role,
+        member_role,
+        mock_org,
+    ):
+        """GIVEN: Requester is owner
+        WHEN: update_org_member is called with max_concurrent_sandboxes_override
+        THEN: Override is updated successfully
+        """
+        requester_membership = MagicMock(spec=OrgMember)
+        requester_membership.org_id = org_id
+        requester_membership.user_id = current_user_id
+        requester_membership.role_id = owner_role.id
+
+        target_membership = MagicMock(spec=OrgMember)
+        target_membership.org_id = org_id
+        target_membership.user_id = target_user_id
+        target_membership.role_id = member_role.id
+        target_membership.status = 'active'
+        target_membership.max_concurrent_sandboxes_override = None
+
+        mock_user = MagicMock(spec=User)
+        mock_user.id = target_user_id
+        mock_user.email = 'target@example.com'
+
+        update_data = OrgMemberUpdate(max_concurrent_sandboxes_override=20)
+
+        with (
+            patch(
+                'server.services.org_member_service.OrgMemberStore.get_org_member',
+                new_callable=AsyncMock,
+            ) as mock_get_member,
+            patch(
+                'server.services.org_member_service.RoleStore.get_role_by_id',
+                new_callable=AsyncMock,
+            ) as mock_get_role,
+            patch(
+                'server.services.org_member_service.OrgStore.get_org_by_id',
+                new_callable=AsyncMock,
+            ) as mock_get_org,
+            patch(
+                'server.services.org_member_service.OrgMemberStore.update_org_member',
+                new_callable=AsyncMock,
+            ) as mock_update_member,
+            patch(
+                'server.services.org_member_service.UserStore.get_user_by_id',
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+        ):
+            mock_get_member.side_effect = [
+                requester_membership,
+                target_membership,
+            ]
+            mock_get_role.side_effect = [owner_role, member_role]
+            mock_get_org.return_value = mock_org
+            mock_get_user.return_value = mock_user
+
+            result = await OrgMemberService.update_org_member(
+                org_id=org_id,
+                target_user_id=target_user_id,
+                current_user_id=current_user_id,
+                update_data=update_data,
+            )
+
+            assert isinstance(result, OrgMemberResponse)
+            mock_update_member.assert_called_once()
+            assert target_membership.max_concurrent_sandboxes_override == 20
+
+    @pytest.mark.asyncio
+    async def test_update_org_member_member_cannot_update_sandbox_override(
+        self,
+        org_id,
+        current_user_id,
+        target_user_id,
+        member_role,
+        mock_org,
+    ):
+        """GIVEN: Requester is regular member
+        WHEN: update_org_member is called with max_concurrent_sandboxes_override
+        THEN: Raises InsufficientPermissionError
+        """
+        requester_membership = MagicMock(spec=OrgMember)
+        requester_membership.org_id = org_id
+        requester_membership.user_id = current_user_id
+        requester_membership.role_id = member_role.id
+
+        target_membership = MagicMock(spec=OrgMember)
+        target_membership.org_id = org_id
+        target_membership.user_id = target_user_id
+        target_membership.role_id = member_role.id
+        target_membership.status = 'active'
+        target_membership.max_concurrent_sandboxes_override = None
+
+        update_data = OrgMemberUpdate(max_concurrent_sandboxes_override=20)
+
+        with (
+            patch(
+                'server.services.org_member_service.OrgMemberStore.get_org_member',
+                new_callable=AsyncMock,
+            ) as mock_get_member,
+            patch(
+                'server.services.org_member_service.RoleStore.get_role_by_id',
+                new_callable=AsyncMock,
+            ) as mock_get_role,
+            patch(
+                'server.services.org_member_service.OrgStore.get_org_by_id',
+                new_callable=AsyncMock,
+            ) as mock_get_org,
+        ):
+            mock_get_member.side_effect = [
+                requester_membership,
+                target_membership,
+            ]
+            mock_get_role.side_effect = [member_role, member_role]
+            mock_get_org.return_value = mock_org
+
+            with pytest.raises(InsufficientPermissionError) as exc_info:
+                await OrgMemberService.update_org_member(
+                    org_id=org_id,
+                    target_user_id=target_user_id,
+                    current_user_id=current_user_id,
+                    update_data=update_data,
+                )
+
+            assert 'sandbox limits' in str(exc_info.value.detail)
