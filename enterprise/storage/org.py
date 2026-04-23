@@ -69,6 +69,7 @@ class Org(Base):
     conversation_expiration: Mapped[int | None] = mapped_column(nullable=True)
     byor_export_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
     sandbox_grouping_strategy: Mapped[str | None] = mapped_column(String, nullable=True)
+    max_concurrent_sandboxes: Mapped[int] = mapped_column(nullable=False, default=3)
 
     # Relationships
     org_members: Mapped[list['OrgMember']] = relationship(

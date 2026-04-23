@@ -41,3 +41,30 @@ class PermissionsError(OpenHandsError):
 
 class SandboxError(OpenHandsError):
     """Error in Sandbox."""
+
+
+class ConcurrencyLimitError(OpenHandsError):
+    """Error when user has reached their concurrent sandbox limit."""
+
+    def __init__(
+        self,
+        limit: int,
+        current: int,
+        detail: Any = None,
+        headers: dict[str, str] | None = None,
+    ):
+        if detail is None:
+            detail = {
+                'error': 'CONCURRENCY_LIMIT_REACHED',
+                'message': (
+                    f'You have reached your limit of {limit} concurrent conversations. '
+                    'Please close an existing conversation to start a new one.'
+                ),
+                'limit': limit,
+                'current': current,
+            }
+        super().__init__(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=detail,
+            headers=headers,
+        )
