@@ -32,7 +32,6 @@ import { LoadingSpinner } from "#/components/shared/loading-spinner";
 import { useAppTitle } from "#/hooks/use-app-title";
 import { useInvitation } from "#/hooks/use-invitation";
 import { InvitationAcceptModal } from "#/components/features/invitations/invitation-accept-modal";
-import { SettingsModal } from "#/components/shared/modals/settings/settings-modal";
 import { useSwitchOrganization } from "#/hooks/mutation/use-switch-organization";
 
 export function ErrorBoundary() {
@@ -74,7 +73,7 @@ export default function MainApp() {
   const { pathname } = useLocation();
   const [searchParams] = useSearchParams();
   const isOnIntermediatePage = useIsOnIntermediatePage();
-  const { data: settings, error: settingsError } = useSettings();
+  const { data: settings } = useSettings();
   const { migrateUserConsent } = useMigrateUserConsent();
   const { t } = useTranslation();
 
@@ -87,7 +86,6 @@ export default function MainApp() {
   } = useIsAuthed();
 
   const [consentFormIsOpen, setConsentFormIsOpen] = React.useState(false);
-  const [settingsModalIsOpen, setSettingsModalIsOpen] = React.useState(false);
 
   // Invitation acceptance modal state
   const { invitationToken, clearInvitation } = useInvitation();
@@ -180,34 +178,6 @@ export default function MainApp() {
     checkLoginMethodExists(),
   );
 
-  const settingsErrorStatus =
-    settingsError?.response?.status ?? settingsError?.status;
-  const shouldAutoOpenSettingsModal =
-    pathname !== "/settings" &&
-    config.data?.app_mode === "oss" &&
-    settingsErrorStatus === 404 &&
-    !config.data?.feature_flags?.hide_llm_settings;
-
-  React.useEffect(() => {
-    if (shouldAutoOpenSettingsModal) {
-      setSettingsModalIsOpen(true);
-    }
-  }, [shouldAutoOpenSettingsModal]);
-
-  React.useEffect(() => {
-    if (
-      pathname === "/settings" ||
-      config.data?.app_mode !== "oss" ||
-      config.data?.feature_flags?.hide_llm_settings
-    ) {
-      setSettingsModalIsOpen(false);
-    }
-  }, [
-    pathname,
-    config.data?.app_mode,
-    config.data?.feature_flags?.hide_llm_settings,
-  ]);
-
   // Listen for storage events to update loginMethodExists when logout happens
   React.useEffect(() => {
     const handleStorageChange = (event: StorageEvent) => {
@@ -289,7 +259,7 @@ export default function MainApp() {
       )}
     >
       <title>{appTitle}</title>
-      <Sidebar allowSettingsModalAutoOpen={false} />
+      <Sidebar />
 
       <div className="flex flex-col w-full h-[calc(100%-50px)] md:h-full gap-3">
         {config.data &&
@@ -315,14 +285,6 @@ export default function MainApp() {
       </div>
 
       {renderReAuthModal && <ReauthModal />}
-      {settingsModalIsOpen && (
-        <SettingsModal
-          settings={settings}
-          onClose={() => {
-            setSettingsModalIsOpen(false);
-          }}
-        />
-      )}
       {config.data?.app_mode === "oss" && consentFormIsOpen && (
         <AnalyticsConsentFormModal
           onClose={() => {

@@ -1,11 +1,15 @@
 import React from "react";
-import { useConfig } from "#/hooks/query/use-config";
-import { useGitUser } from "#/hooks/query/use-git-user";
+import { useConfig } from "./query/use-config";
+import { useGitUser } from "./query/use-git-user";
 import { getLoginMethod, LoginMethod } from "#/utils/local-storage";
 import reoService, { ReoIdentity } from "#/utils/reo";
 import { isProductionDomain } from "#/utils/utils";
 
+/**
+ * Maps login method to Reo identity type
+ */
 const mapLoginMethodToReoType = (method: LoginMethod): ReoIdentity["type"] => {
+  // Reo is not supporting gitlab and bitbucket.
   switch (method) {
     case LoginMethod.GITHUB:
       return "github";
@@ -16,6 +20,9 @@ const mapLoginMethodToReoType = (method: LoginMethod): ReoIdentity["type"] => {
   }
 };
 
+/**
+ * Creates email identity object if email is available
+ */
 const buildEmailIdentity = (
   email?: string | null,
 ): ReoIdentity["other_identities"] => {
@@ -31,6 +38,10 @@ const buildEmailIdentity = (
   ];
 };
 
+/**
+ * Parses full name into firstname and lastname
+ * Handles cases where name might be empty or only have one part
+ */
 const parseNameFields = (
   fullName?: string | null,
 ): { firstname?: string; lastname?: string } => {
@@ -49,6 +60,9 @@ const parseNameFields = (
   };
 };
 
+/**
+ * Builds complete Reo identity from user data and login method
+ */
 const buildReoIdentity = (
   user: {
     login: string;
@@ -70,11 +84,16 @@ const buildReoIdentity = (
   };
 };
 
+/**
+ * Hook to handle Reo.dev tracking integration
+ * Only active in SaaS mode
+ */
 export const useReoTracking = () => {
   const { data: config } = useConfig();
   const { data: user } = useGitUser();
   const [hasIdentified, setHasIdentified] = React.useState(false);
 
+  // Initialize Reo.dev when in SaaS mode and on the correct domain
   React.useEffect(() => {
     const initReo = async () => {
       if (
@@ -89,6 +108,7 @@ export const useReoTracking = () => {
     initReo();
   }, [config?.app_mode]);
 
+  // Identify user when user data is available and we're in SaaS mode on correct domain
   React.useEffect(() => {
     if (
       config?.app_mode !== "saas" ||
@@ -105,8 +125,11 @@ export const useReoTracking = () => {
       return;
     }
 
+    // Build identity payload from user data
     const identity = buildReoIdentity(user, loginMethod);
+
+    // Identify user in Reo
     reoService.identify(identity);
     setHasIdentified(true);
-  }, [config?.app_mode, hasIdentified, user]);
+  }, [config?.app_mode, user, hasIdentified]);
 };

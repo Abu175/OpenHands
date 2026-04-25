@@ -31,8 +31,8 @@ import {
   type SettingsValueSource,
   type SettingsView,
 } from "#/utils/sdk-settings-schema";
-import { SchemaField } from "#/components/features/settings/sdk-settings/schema-field";
-import { ViewToggle } from "#/components/features/settings/sdk-settings/view-toggle";
+import { SchemaField } from "./schema-field";
+import { ViewToggle } from "./view-toggle";
 
 const EMPTY_EXCLUDE_KEYS = new Set<string>();
 
@@ -251,7 +251,7 @@ export function SdkSectionPage({
   );
 
   const handleError = React.useCallback(
-    (error: Error) => {
+    (error: unknown) => {
       const msg = retrieveAxiosErrorMessage(error);
       displayErrorToast(msg || t(I18nKey.ERROR$GENERIC));
     },

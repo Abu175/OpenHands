@@ -6,8 +6,8 @@ import {
   Scripts,
   ScrollRestoration,
 } from "react-router";
-import "@openhands/agent-server-gui/src/tailwind.css";
-import "@openhands/agent-server-gui/src/index.css";
+import "./tailwind.css";
+import "./index.css";
 import React from "react";
 import { Toaster } from "react-hot-toast";
 import { useInvitation } from "#/hooks/use-invitation";

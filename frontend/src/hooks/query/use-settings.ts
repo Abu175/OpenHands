@@ -1,13 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { AxiosError } from "axios";
+import { isAxiosError } from "axios";
 import { useSelectedOrganizationId } from "#/context/use-selected-organization";
 import { useIsOnIntermediatePage } from "#/hooks/use-is-on-intermediate-page";
 import { DEFAULT_SETTINGS } from "#/services/settings";
 import { Settings, SettingsScope, SettingsValue } from "#/types/settings";
 import { organizationService } from "#/api/organization-service/organization-service.api";
 import SettingsService from "#/api/settings-service/settings-service.api";
-import { useIsAuthed } from "#/hooks/query/use-is-authed";
-import { useConfig } from "#/hooks/query/use-config";
+import { useIsAuthed } from "./use-is-authed";
+import { useConfig } from "./use-config";
 import {
   pickFirstBoolean,
   pickFirstNumber,
@@ -130,10 +130,10 @@ export const useSettings = (scope: SettingsScope = "personal") => {
 
   const isOss = config?.app_mode === "oss";
 
-  const query = useQuery<Settings, AxiosError>({
+  const query = useQuery({
     queryKey: ["settings", scope, organizationId],
     queryFn: () => getSettingsQueryFn(scope, organizationId),
-    retry: (_, error) => (error.response?.status ?? error.status) !== 404,
+    retry: (_, error) => !isAxiosError(error) || error.response?.status !== 404,
     refetchOnWindowFocus: false,
     staleTime: 1000 * 60 * 5,
     gcTime: 1000 * 60 * 15,
@@ -146,11 +146,15 @@ export const useSettings = (scope: SettingsScope = "personal") => {
     },
   });
 
+  const queryErrorStatus = isAxiosError(query.error)
+    ? query.error.response?.status
+    : undefined;
+
   // We want to return the defaults if the settings aren't found so the user can still see the
   // options to make their initial save. We don't set the defaults in `initialData` above because
   // that would prepopulate the data to the cache and mess with expectations. Read more:
   // https://tanstack.com/query/latest/docs/framework/react/guides/initial-query-data#using-initialdata-to-prepopulate-a-query
-  if ((query.error?.response?.status ?? query.error?.status) === 404) {
+  if (queryErrorStatus === 404) {
     // Create a new object with only the properties we need, avoiding rest destructuring
     return {
       data: DEFAULT_SETTINGS,

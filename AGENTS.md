@@ -147,6 +147,8 @@ Frontend:
   - Mutation hooks should follow the pattern use[Action] (e.g., `useDeleteConversation`)
   - Architecture rule: UI components → TanStack Query hooks → Data Access Layer (`frontend/src/api`) → API endpoints
   - For SaaS organization management screens, prefer deriving the selected organization from `useOrganizations()` plus the selected org ID store instead of adding a dedicated single-org fetch when only list-level fields (for example `name`) are needed.
+  - PR `#14124` depends on the shared `@openhands/agent-server-gui` wrapper/fallback setup in `frontend/vite.config.ts`; do not replace that file with the plain main-branch version or shared-package `#/...` imports will stop resolving during build.
+  - When consuming the OSS-only `@openhands/agent-server-gui` commit `2cbc504`, OpenHands must keep SaaS/cloud-only frontend code locally (auth/org/billing/onboarding/invitations/API keys/settings helpers) plus local support files like `src/query-client-config.ts`, `src/tailwind.css`, `src/index.css`, and toast helpers.
 
 
 VSCode Extension:

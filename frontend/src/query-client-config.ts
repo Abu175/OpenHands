@@ -1,21 +1,17 @@
-import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
-import { isAxiosError } from "axios";
+import { QueryCache, MutationCache, QueryClient } from "@tanstack/react-query";
 import i18next from "i18next";
-import { I18nKey } from "#/i18n/declaration";
-import { displayErrorToast } from "#/utils/custom-toast-handlers";
-import { retrieveAxiosErrorMessage } from "#/utils/retrieve-axios-error-message";
+import { isAxiosError } from "axios";
+import { I18nKey } from "./i18n/declaration";
+import { retrieveAxiosErrorMessage } from "./utils/retrieve-axios-error-message";
+import { displayErrorToast } from "./utils/custom-toast-handlers";
 
 const handle401Error = (error: unknown, queryClient: QueryClient) => {
-  if (
-    isAxiosError(error) &&
-    (error.response?.status === 401 || error.status === 401)
-  ) {
+  if (isAxiosError(error) && error.response?.status === 401) {
     queryClient.invalidateQueries({ queryKey: ["user", "authenticated"] });
   }
 };
 
 const shownErrors = new Set<string>();
-
 export const queryClient = new QueryClient({
   queryCache: new QueryCache({
     onError: (error, query) => {
@@ -30,10 +26,10 @@ export const queryClient = new QueryClient({
 
         if (!shownErrors.has(errorMessage || "")) {
           displayErrorToast(errorMessage || i18next.t(I18nKey.ERROR$GENERIC));
-          shownErrors.add(errorMessage || "");
+          shownErrors.add(errorMessage);
 
           setTimeout(() => {
-            shownErrors.delete(errorMessage || "");
+            shownErrors.delete(errorMessage);
           }, 3000);
         }
       }

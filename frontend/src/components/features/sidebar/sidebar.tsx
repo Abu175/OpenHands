@@ -1,4 +1,5 @@
 import React from "react";
+import { isAxiosError } from "axios";
 import { useLocation } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useGitUser } from "#/hooks/query/use-git-user";
@@ -38,8 +39,9 @@ export function Sidebar({ allowSettingsModalAutoOpen = true }: SidebarProps) {
   const [conversationPanelIsOpen, setConversationPanelIsOpen] =
     React.useState(false);
 
-  const settingsErrorStatus =
-    settingsError?.response?.status ?? settingsError?.status;
+  const settingsErrorStatus = isAxiosError(settingsError)
+    ? settingsError.response?.status
+    : undefined;
 
   React.useEffect(() => {
     if (pathname === "/settings") {
