@@ -2757,4 +2757,4 @@ class TestOrgMemberServiceConcurrencyLimits:
                     update_data=update_data,
                 )
 
-            assert 'sandbox limits' in str(exc_info.value.detail)
+            assert 'sandbox limits' in str(exc_info.value)
