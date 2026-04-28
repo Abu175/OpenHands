@@ -125,6 +125,7 @@ def _agent_kind_to_router_path(agent_kind: str) -> str:
         return 'acp/conversations'
     return 'conversations'
 
+
 # Planning agent instruction to prevent "Ready to proceed?" behavior
 PLANNING_AGENT_INSTRUCTION = """<IMPORTANT_PLANNING_BOUNDARIES>
 You are a Planning Agent that can ONLY create plans - you CANNOT execute code or make changes.
@@ -506,11 +507,13 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
 
         # Split by agent kind
         llm_ids = [
-            cid for cid in conversation_ids
+            cid
+            for cid in conversation_ids
             if conversation_kind_by_id.get(cid, 'llm') != 'acp'
         ]
         acp_ids = [
-            cid for cid in conversation_ids
+            cid
+            for cid in conversation_ids
             if conversation_kind_by_id.get(cid, 'llm') == 'acp'
         ]
 
@@ -591,7 +594,9 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 None,
             )
             if conversation_url:
-                router_path = _agent_kind_to_router_path(app_conversation_info.agent_kind)
+                router_path = _agent_kind_to_router_path(
+                    app_conversation_info.agent_kind
+                )
                 conversation_url += f'/api/{router_path}/{app_conversation_info.id.hex}'
             session_api_key = sandbox.session_api_key
 
@@ -1576,7 +1581,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         acp_agent = ACPAgent(
             acp_command=acp_settings.acp_command,
             acp_args=acp_settings.acp_args,
-            acp_env=merged_env or None,
+            acp_env=merged_env,
             acp_model=acp_settings.acp_model,
             acp_session_mode=acp_settings.acp_session_mode,
             acp_prompt_timeout=acp_settings.acp_prompt_timeout,

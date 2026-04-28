@@ -11,10 +11,12 @@ try:
         export_agent_settings_schema,
         validate_agent_settings,
     )
+
     _HAS_DISCRIMINATED_UNION = True
 except ImportError:
     _HAS_DISCRIMINATED_UNION = False
     from openhands.sdk.settings import AgentSettings
+
     LLMAgentSettings = AgentSettings  # type: ignore[misc, assignment]
 
     class _ACPAgentSettingsStub:

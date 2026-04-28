@@ -23,7 +23,6 @@ from openhands.integrations.provider import (
     ProviderType,
 )
 from openhands.sdk.settings import ConversationSettings
-from openhands.utils.sdk_settings_compat import LLMAgentSettings, export_agent_settings_schema
 from openhands.server.shared import config
 from openhands.server.user_auth import (
     get_provider_tokens,
@@ -35,6 +34,10 @@ from openhands.utils.llm import (
     get_provider_api_base,
     is_openhands_model,
     resolve_llm_base_url,
+)
+from openhands.utils.sdk_settings_compat import (
+    LLMAgentSettings,
+    export_agent_settings_schema,
 )
 
 LITE_LLM_API_URL = os.environ.get(

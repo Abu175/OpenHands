@@ -3,10 +3,10 @@
 import pytest
 
 from openhands.utils.sdk_settings_compat import (
+    _HAS_DISCRIMINATED_UNION,
     ACPAgentSettings,
     AgentSettingsConfig,
     LLMAgentSettings,
-    _HAS_DISCRIMINATED_UNION,
     default_agent_settings,
     export_agent_settings_schema,
     validate_agent_settings,

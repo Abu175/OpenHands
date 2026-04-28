@@ -205,9 +205,7 @@ class Settings(BaseModel):
 
             # Use object.__setattr__ to avoid validate_assignment
             # side-effects on other fields.
-            object.__setattr__(
-                self, 'agent_settings', validate_agent_settings(merged)
-            )
+            object.__setattr__(self, 'agent_settings', validate_agent_settings(merged))
 
         conv_update = payload.get('conversation_settings_diff')
         if isinstance(conv_update, dict):
@@ -252,7 +250,9 @@ class Settings(BaseModel):
 
     @field_serializer('agent_settings')
     def agent_settings_serializer(
-        self, agent_settings: LLMAgentSettings | ACPAgentSettings, info: SerializationInfo
+        self,
+        agent_settings: LLMAgentSettings | ACPAgentSettings,
+        info: SerializationInfo,
     ) -> dict[str, Any]:
         context = info.context or {}
         if context.get('expose_secrets', False):
