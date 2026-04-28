@@ -1491,8 +1491,13 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         """Translate user credentials into ACP provider environment variables.
 
         The ACP subprocess reads provider credentials from environment variables.
-        This method maps user settings (LLM API key, etc.) to the env vars
-        expected by the ACP provider.
+        This method maps the user's LLM API key to the env var expected by the
+        active ACP server:
+
+        - claude-code  → ANTHROPIC_API_KEY (uses bypassPermissions; key optional)
+        - codex        → OPENAI_API_KEY
+        - gemini-cli   → GEMINI_API_KEY
+        - custom       → user manages keys entirely via acp_env
 
         Args:
             user: User information containing credentials
@@ -1502,25 +1507,33 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         """
         env: dict[str, str] = {}
 
-        # Translate LLM API key if present (used by claude-code and gemini-cli)
-        if isinstance(user.agent_settings, ACPAgentSettings):
-            acp_settings = user.agent_settings
-            # Pass through any explicit acp_env overrides from settings
-            if acp_settings.acp_env:
-                env.update(acp_settings.acp_env)
+        if not isinstance(user.agent_settings, ACPAgentSettings):
+            return env
 
-        # Pass the LLM API key from the LLM config if available
-        llm_api_key = user.agent_settings.llm.api_key
-        if llm_api_key:
-            key_value = (
-                llm_api_key.get_secret_value()
-                if isinstance(llm_api_key, SecretStr)
-                else str(llm_api_key)
-            )
-            if key_value and key_value.strip():
-                # claude-code reads ANTHROPIC_API_KEY; gemini-cli reads GEMINI_API_KEY
-                # We set ANTHROPIC_API_KEY as the primary; providers may remap as needed.
-                env['ANTHROPIC_API_KEY'] = key_value
+        acp_settings = user.agent_settings
+
+        # Pass through any explicit per-key overrides first; the API-key
+        # injection below will not overwrite keys already set here.
+        if acp_settings.acp_env:
+            env.update(acp_settings.acp_env)
+
+        # Map the user's LLM API key to the env var expected by the ACP server.
+        _SERVER_API_KEY_ENV: dict[str, str] = {
+            'claude-code': 'ANTHROPIC_API_KEY',
+            'codex': 'OPENAI_API_KEY',
+            'gemini-cli': 'GEMINI_API_KEY',
+        }
+        api_key_env = _SERVER_API_KEY_ENV.get(acp_settings.acp_server)
+        if api_key_env and api_key_env not in env:
+            llm_api_key = acp_settings.llm.api_key
+            if llm_api_key:
+                key_value = (
+                    llm_api_key.get_secret_value()
+                    if isinstance(llm_api_key, SecretStr)
+                    else str(llm_api_key)
+                )
+                if key_value and key_value.strip():
+                    env[api_key_env] = key_value
 
         return env
 
