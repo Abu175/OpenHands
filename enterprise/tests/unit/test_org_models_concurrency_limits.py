@@ -51,7 +51,10 @@ class TestOrgResponseConcurrencyLimits:
             contact_email='test@example.com',
         )
 
-        assert response.max_concurrent_sandboxes == DEFAULT_PERSONAL_ORG_CONCURRENT_SANDBOXES
+        assert (
+            response.max_concurrent_sandboxes
+            == DEFAULT_PERSONAL_ORG_CONCURRENT_SANDBOXES
+        )
 
     def test_org_response_from_org_includes_max_concurrent_sandboxes(self):
         """Test that OrgResponse.from_org includes max_concurrent_sandboxes."""
@@ -102,7 +105,10 @@ class TestOrgResponseConcurrencyLimits:
         # Pass user_id matching org.id to simulate personal org
         response = OrgResponse.from_org(mock_org, user_id=str(mock_org.id))
 
-        assert response.max_concurrent_sandboxes == DEFAULT_PERSONAL_ORG_CONCURRENT_SANDBOXES
+        assert (
+            response.max_concurrent_sandboxes
+            == DEFAULT_PERSONAL_ORG_CONCURRENT_SANDBOXES
+        )
 
     def test_org_response_from_org_uses_commercial_default_when_none(self):
         """Test that OrgResponse.from_org uses commercial default for commercial orgs when None."""
@@ -128,7 +134,10 @@ class TestOrgResponseConcurrencyLimits:
         # No user_id = commercial org
         response = OrgResponse.from_org(mock_org)
 
-        assert response.max_concurrent_sandboxes == DEFAULT_COMMERCIAL_ORG_CONCURRENT_SANDBOXES
+        assert (
+            response.max_concurrent_sandboxes
+            == DEFAULT_COMMERCIAL_ORG_CONCURRENT_SANDBOXES
+        )
 
 
 class TestOrgUpdateConcurrencyLimits:
@@ -236,7 +245,10 @@ class TestOrgAppSettingsResponseConcurrencyLimits:
         """Test that OrgAppSettingsResponse has default value."""
         response = OrgAppSettingsResponse()
 
-        assert response.max_concurrent_sandboxes == DEFAULT_PERSONAL_ORG_CONCURRENT_SANDBOXES
+        assert (
+            response.max_concurrent_sandboxes
+            == DEFAULT_PERSONAL_ORG_CONCURRENT_SANDBOXES
+        )
 
     def test_org_app_settings_response_from_org(self):
         """Test that OrgAppSettingsResponse.from_org includes max_concurrent_sandboxes."""

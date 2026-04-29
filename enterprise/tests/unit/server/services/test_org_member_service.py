@@ -2697,7 +2697,10 @@ class TestOrgMemberServiceConcurrencyLimits:
 
             assert result.max_concurrent_sandboxes_override is None
             # fallback to personal org default when org is None
-            assert result.effective_max_concurrent_sandboxes == DEFAULT_PERSONAL_ORG_CONCURRENT_SANDBOXES
+            assert (
+                result.effective_max_concurrent_sandboxes
+                == DEFAULT_PERSONAL_ORG_CONCURRENT_SANDBOXES
+            )
 
     @pytest.mark.asyncio
     async def test_get_org_members_returns_effective_limits(
