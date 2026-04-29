@@ -420,3 +420,41 @@ async def require_financial_data_access(
         extra={'user_id': user_id, 'org_id': str(org_id), 'role': user_role.name},
     )
     return user_id
+
+
+# Email domain for OpenHands team members
+OPENHANDS_EMAIL_DOMAIN = '@openhands.dev'
+
+
+async def require_openhands_email_for_sandbox_limits(
+    request: Request,
+    has_sandbox_limit_field: bool,
+) -> None:
+    """Require @openhands.dev email when modifying sandbox concurrency limits.
+
+    This function should be called in route handlers when a request includes
+    fields that modify sandbox concurrency limits (max_concurrent_sandboxes or
+    max_concurrent_sandboxes_override).
+
+    Args:
+        request: FastAPI request object
+        has_sandbox_limit_field: Whether the request includes a sandbox limit field
+
+    Raises:
+        HTTPException: 403 if field is present and user doesn't have @openhands.dev email
+    """
+    if not has_sandbox_limit_field:
+        return
+
+    user_auth = await get_user_auth(request)
+    email = await user_auth.get_user_email()
+
+    if not email or not email.endswith(OPENHANDS_EMAIL_DOMAIN):
+        logger.warning(
+            'Non-OpenHands user attempted to modify sandbox limits',
+            extra={'email': email},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='Only OpenHands team members can modify concurrency limits',
+        )

@@ -1,10 +1,11 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from server.auth.authorization import (
     Permission,
     require_financial_data_access,
+    require_openhands_email_for_sandbox_limits,
     require_permission,
 )
 from server.email_validation import get_admin_user_id
@@ -423,6 +424,7 @@ async def get_org_app_settings(
     dependencies=[Depends(require_permission(Permission.MANAGE_APPLICATION_SETTINGS))],
 )
 async def update_org_app_settings(
+    request: Request,
     update_data: OrgAppSettingsUpdate,
     service: OrgAppSettingsService = org_app_settings_service_dependency,
 ) -> OrgAppSettingsResponse:
@@ -433,6 +435,7 @@ async def update_org_app_settings(
     which is granted to all organization members (member, admin, and owner roles).
 
     Args:
+        request: FastAPI request object
         update_data: App settings update data
         service: OrgAppSettingsService (injected by dependency)
 
@@ -441,11 +444,17 @@ async def update_org_app_settings(
 
     Raises:
         HTTPException: 401 if user is not authenticated
-        HTTPException: 403 if user lacks MANAGE_APPLICATION_SETTINGS permission
+        HTTPException: 403 if user lacks MANAGE_APPLICATION_SETTINGS permission or
+            attempts to modify sandbox limits without @openhands.dev email
         HTTPException: 404 if current organization not found
         HTTPException: 422 if validation errors occur (handled by FastAPI)
         HTTPException: 500 if update fails
     """
+    # Restrict sandbox limit changes to @openhands.dev users
+    await require_openhands_email_for_sandbox_limits(
+        request, update_data.max_concurrent_sandboxes is not None
+    )
+
     try:
         return await service.update_org_app_settings(update_data)
     except OrgNotFoundError:
@@ -676,6 +685,7 @@ async def delete_org(
 
 @org_router.patch('/{org_id}', response_model=OrgResponse)
 async def update_org(
+    request: Request,
     org_id: UUID,
     update_data: OrgUpdate,
     user_id: str = Depends(require_permission(Permission.EDIT_ORG_SETTINGS)),
@@ -686,6 +696,7 @@ async def update_org(
     permission, which is granted to admin and owner roles.
 
     Args:
+        request: FastAPI request object
         org_id: Organization ID to update (UUID)
         update_data: Organization update data
         user_id: Authenticated user ID (injected by require_permission dependency)
@@ -695,12 +706,18 @@ async def update_org(
 
     Raises:
         HTTPException: 401 if user is not authenticated
-        HTTPException: 403 if user lacks EDIT_ORG_SETTINGS permission
+        HTTPException: 403 if user lacks EDIT_ORG_SETTINGS permission or attempts
+            to modify sandbox limits without @openhands.dev email
         HTTPException: 404 if organization not found
         HTTPException: 409 if organization name already exists
         HTTPException: 422 if validation errors occur (handled by FastAPI)
         HTTPException: 500 if update fails
     """
+    # Restrict sandbox limit changes to @openhands.dev users
+    await require_openhands_email_for_sandbox_limits(
+        request, update_data.max_concurrent_sandboxes is not None
+    )
+
     logger.info(
         'Updating organization',
         extra={
@@ -1171,6 +1188,7 @@ async def switch_org(
 
 @org_router.patch('/{org_id}/members/{user_id}', response_model=OrgMemberResponse)
 async def update_org_member(
+    request: Request,
     org_id: UUID,
     user_id: str,
     update_data: OrgMemberUpdate,
@@ -1185,7 +1203,14 @@ async def update_org_member(
     - Owners cannot modify other Owners
 
     Members cannot modify their own role. The last owner cannot be demoted.
+
+    Sandbox limit overrides can only be modified by users with @openhands.dev email.
     """
+    # Restrict sandbox limit changes to @openhands.dev users
+    await require_openhands_email_for_sandbox_limits(
+        request, update_data.max_concurrent_sandboxes_override is not None
+    )
+
     try:
         return await OrgMemberService.update_org_member(
             org_id=org_id,

@@ -1525,6 +1525,10 @@ async def test_update_org_personal_workspace_preserved():
             'server.routes.orgs.OrgService.get_org_credits',
             AsyncMock(return_value=75.0),
         ),
+        patch(
+            'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+            AsyncMock(),
+        ),
     ):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url='http://test'
@@ -1586,6 +1590,10 @@ async def test_update_org_team_workspace_preserved():
             'server.routes.orgs.OrgService.get_org_credits',
             AsyncMock(return_value=150.0),
         ),
+        patch(
+            'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+            AsyncMock(),
+        ),
     ):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url='http://test'
@@ -1623,6 +1631,10 @@ async def test_update_org_not_found(mock_update_app, mock_owner_role):
             AsyncMock(
                 side_effect=ValueError(f'Organization with ID {org_id} not found')
             ),
+        ),
+        patch(
+            'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+            AsyncMock(),
         ),
     ):
         async with httpx.AsyncClient(
@@ -1695,6 +1707,10 @@ async def test_update_org_permission_denied_llm_settings(
                 )
             ),
         ),
+        patch(
+            'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+            AsyncMock(),
+        ),
     ):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=mock_update_app), base_url='http://test'
@@ -1732,6 +1748,10 @@ async def test_update_org_duplicate_name_returns_409(mock_update_app, mock_owner
             'server.routes.orgs.OrgService.update_org_with_permissions',
             AsyncMock(side_effect=OrgNameExistsError('Existing Organization')),
         ),
+        patch(
+            'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+            AsyncMock(),
+        ),
     ):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=mock_update_app), base_url='http://test'
@@ -1766,6 +1786,10 @@ async def test_update_org_database_error(mock_update_app, mock_owner_role):
             'server.routes.orgs.OrgService.update_org_with_permissions',
             AsyncMock(side_effect=OrgDatabaseError('Database connection failed')),
         ),
+        patch(
+            'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+            AsyncMock(),
+        ),
     ):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=mock_update_app), base_url='http://test'
@@ -1799,6 +1823,10 @@ async def test_update_org_unexpected_error(mock_update_app, mock_owner_role):
         patch(
             'server.routes.orgs.OrgService.update_org_with_permissions',
             AsyncMock(side_effect=RuntimeError('Unexpected system error')),
+        ),
+        patch(
+            'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+            AsyncMock(),
         ),
     ):
         async with httpx.AsyncClient(
@@ -2570,9 +2598,14 @@ class TestRemoveOrgMemberEndpoint:
 class TestUpdateOrgMemberEndpoint:
     """Test cases for PATCH /api/organizations/{org_id}/members/{user_id} endpoint."""
 
+    @pytest.fixture
+    def mock_request(self):
+        """Create a mock request object."""
+        return MagicMock(spec=Request)
+
     @pytest.mark.asyncio
     async def test_update_member_role_succeeds_returns_member_response(
-        self, org_id, current_user_id, target_user_id
+        self, org_id, current_user_id, target_user_id, mock_request
     ):
         """GIVEN valid role update request WHEN PATCH is called THEN returns 200 with updated OrgMemberResponse."""
         # Arrange
@@ -2584,13 +2617,20 @@ class TestUpdateOrgMemberEndpoint:
             role_rank=20,
             status='active',
         )
-        with patch(
-            'server.routes.orgs.OrgMemberService.update_org_member'
-        ) as mock_update:
+        with (
+            patch(
+                'server.routes.orgs.OrgMemberService.update_org_member'
+            ) as mock_update,
+            patch(
+                'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+                new_callable=AsyncMock,
+            ),
+        ):
             mock_update.return_value = updated
 
             # Act - endpoint now expects UUID type for org_id
             result = await update_org_member(
+                request=mock_request,
                 org_id=uuid.UUID(org_id),
                 user_id=target_user_id,
                 update_data=OrgMemberUpdate(role='admin'),
@@ -2608,18 +2648,25 @@ class TestUpdateOrgMemberEndpoint:
 
     @pytest.mark.asyncio
     async def test_not_a_member_returns_403(
-        self, org_id, current_user_id, target_user_id
+        self, org_id, current_user_id, target_user_id, mock_request
     ):
         """GIVEN requester is not a member WHEN PATCH is called THEN returns 403."""
         # Arrange
-        with patch(
-            'server.routes.orgs.OrgMemberService.update_org_member'
-        ) as mock_update:
+        with (
+            patch(
+                'server.routes.orgs.OrgMemberService.update_org_member'
+            ) as mock_update,
+            patch(
+                'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+                new_callable=AsyncMock,
+            ),
+        ):
             mock_update.side_effect = OrgMemberNotFoundError(org_id, current_user_id)
 
             # Act & Assert
             with pytest.raises(HTTPException) as exc_info:
                 await update_org_member(
+                    request=mock_request,
                     org_id=uuid.UUID(org_id),
                     user_id=target_user_id,
                     update_data=OrgMemberUpdate(role='user'),
@@ -2629,17 +2676,26 @@ class TestUpdateOrgMemberEndpoint:
             assert 'not a member' in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_cannot_modify_self_returns_403(self, org_id, current_user_id):
+    async def test_cannot_modify_self_returns_403(
+        self, org_id, current_user_id, mock_request
+    ):
         """GIVEN target user is self WHEN PATCH is called THEN returns 403."""
         # Arrange
-        with patch(
-            'server.routes.orgs.OrgMemberService.update_org_member'
-        ) as mock_update:
+        with (
+            patch(
+                'server.routes.orgs.OrgMemberService.update_org_member'
+            ) as mock_update,
+            patch(
+                'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+                new_callable=AsyncMock,
+            ),
+        ):
             mock_update.side_effect = CannotModifySelfError('modify')
 
             # Act & Assert
             with pytest.raises(HTTPException) as exc_info:
                 await update_org_member(
+                    request=mock_request,
                     org_id=uuid.UUID(org_id),
                     user_id=current_user_id,
                     update_data=OrgMemberUpdate(role='admin'),
@@ -2650,18 +2706,25 @@ class TestUpdateOrgMemberEndpoint:
 
     @pytest.mark.asyncio
     async def test_member_not_found_returns_404(
-        self, org_id, current_user_id, target_user_id
+        self, org_id, current_user_id, target_user_id, mock_request
     ):
         """GIVEN target member does not exist WHEN PATCH is called THEN returns 404."""
         # Arrange
-        with patch(
-            'server.routes.orgs.OrgMemberService.update_org_member'
-        ) as mock_update:
+        with (
+            patch(
+                'server.routes.orgs.OrgMemberService.update_org_member'
+            ) as mock_update,
+            patch(
+                'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+                new_callable=AsyncMock,
+            ),
+        ):
             mock_update.side_effect = OrgMemberNotFoundError(org_id, target_user_id)
 
             # Act & Assert
             with pytest.raises(HTTPException) as exc_info:
                 await update_org_member(
+                    request=mock_request,
                     org_id=uuid.UUID(org_id),
                     user_id=target_user_id,
                     update_data=OrgMemberUpdate(role='user'),
@@ -2672,18 +2735,25 @@ class TestUpdateOrgMemberEndpoint:
 
     @pytest.mark.asyncio
     async def test_invalid_role_returns_400(
-        self, org_id, current_user_id, target_user_id
+        self, org_id, current_user_id, target_user_id, mock_request
     ):
         """GIVEN invalid role name WHEN PATCH is called THEN returns 400."""
         # Arrange
-        with patch(
-            'server.routes.orgs.OrgMemberService.update_org_member'
-        ) as mock_update:
+        with (
+            patch(
+                'server.routes.orgs.OrgMemberService.update_org_member'
+            ) as mock_update,
+            patch(
+                'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+                new_callable=AsyncMock,
+            ),
+        ):
             mock_update.side_effect = InvalidRoleError('superuser')
 
             # Act & Assert
             with pytest.raises(HTTPException) as exc_info:
                 await update_org_member(
+                    request=mock_request,
                     org_id=uuid.UUID(org_id),
                     user_id=target_user_id,
                     update_data=OrgMemberUpdate(role='superuser'),
@@ -2694,13 +2764,19 @@ class TestUpdateOrgMemberEndpoint:
 
     @pytest.mark.asyncio
     async def test_insufficient_permission_returns_403(
-        self, org_id, current_user_id, target_user_id
+        self, org_id, current_user_id, target_user_id, mock_request
     ):
         """GIVEN requester lacks permission to change target WHEN PATCH is called THEN returns 403."""
         # Arrange
-        with patch(
-            'server.routes.orgs.OrgMemberService.update_org_member'
-        ) as mock_update:
+        with (
+            patch(
+                'server.routes.orgs.OrgMemberService.update_org_member'
+            ) as mock_update,
+            patch(
+                'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+                new_callable=AsyncMock,
+            ),
+        ):
             mock_update.side_effect = InsufficientPermissionError(
                 'You do not have permission to modify this member'
             )
@@ -2708,6 +2784,7 @@ class TestUpdateOrgMemberEndpoint:
             # Act & Assert
             with pytest.raises(HTTPException) as exc_info:
                 await update_org_member(
+                    request=mock_request,
                     org_id=uuid.UUID(org_id),
                     user_id=target_user_id,
                     update_data=OrgMemberUpdate(role='admin'),
@@ -2718,18 +2795,25 @@ class TestUpdateOrgMemberEndpoint:
 
     @pytest.mark.asyncio
     async def test_cannot_demote_last_owner_returns_400(
-        self, org_id, current_user_id, target_user_id
+        self, org_id, current_user_id, target_user_id, mock_request
     ):
         """GIVEN demoting last owner WHEN PATCH is called THEN returns 400."""
         # Arrange
-        with patch(
-            'server.routes.orgs.OrgMemberService.update_org_member'
-        ) as mock_update:
+        with (
+            patch(
+                'server.routes.orgs.OrgMemberService.update_org_member'
+            ) as mock_update,
+            patch(
+                'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+                new_callable=AsyncMock,
+            ),
+        ):
             mock_update.side_effect = LastOwnerError('demote')
 
             # Act & Assert
             with pytest.raises(HTTPException) as exc_info:
                 await update_org_member(
+                    request=mock_request,
                     org_id=uuid.UUID(org_id),
                     user_id=target_user_id,
                     update_data=OrgMemberUpdate(role='admin'),
@@ -2757,6 +2841,33 @@ class TestUpdateOrgMemberEndpoint:
                 json={'role': 'user'},
             )
             assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    @pytest.mark.asyncio
+    async def test_sandbox_limit_update_rejected_for_non_openhands_email(
+        self, org_id, current_user_id, target_user_id, mock_request
+    ):
+        """GIVEN non-@openhands.dev user updates sandbox limit WHEN PATCH is called THEN returns 403."""
+        # Arrange
+        with patch(
+            'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+            new_callable=AsyncMock,
+        ) as mock_email_check:
+            mock_email_check.side_effect = HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail='Only OpenHands team members can modify concurrency limits',
+            )
+
+            # Act & Assert
+            with pytest.raises(HTTPException) as exc_info:
+                await update_org_member(
+                    request=mock_request,
+                    org_id=uuid.UUID(org_id),
+                    user_id=target_user_id,
+                    update_data=OrgMemberUpdate(max_concurrent_sandboxes_override=10),
+                    current_user_id=current_user_id,
+                )
+            assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+            assert 'Only OpenHands team members' in exc_info.value.detail
 
 
 class TestGetMeEndpoint:
@@ -3383,6 +3494,10 @@ async def test_update_org_app_settings_success(
             'server.routes.orgs.OrgAppSettingsService.update_org_app_settings',
             AsyncMock(return_value=mock_response),
         ) as mock_update,
+        patch(
+            'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+            AsyncMock(),
+        ),
     ):
         client = TestClient(mock_app_with_get_user_id)
 
@@ -3427,6 +3542,10 @@ async def test_update_org_app_settings_partial_update(
             'server.routes.orgs.OrgAppSettingsService.update_org_app_settings',
             AsyncMock(return_value=mock_response),
         ) as mock_update,
+        patch(
+            'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+            AsyncMock(),
+        ),
     ):
         client = TestClient(mock_app_with_get_user_id)
 
@@ -3468,6 +3587,10 @@ async def test_update_org_app_settings_set_null(
         patch(
             'server.routes.orgs.OrgAppSettingsService.update_org_app_settings',
             AsyncMock(return_value=mock_response),
+        ),
+        patch(
+            'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+            AsyncMock(),
         ),
     ):
         client = TestClient(mock_app_with_get_user_id)
@@ -3555,6 +3678,10 @@ async def test_update_org_app_settings_not_found(
             'server.routes.orgs.OrgAppSettingsService.update_org_app_settings',
             AsyncMock(side_effect=OrgNotFoundError('current')),
         ),
+        patch(
+            'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+            AsyncMock(),
+        ),
     ):
         client = TestClient(mock_app_with_get_user_id)
 
@@ -3587,6 +3714,10 @@ async def test_update_org_app_settings_database_error(
         patch(
             'server.routes.orgs.OrgAppSettingsService.update_org_app_settings',
             AsyncMock(side_effect=Exception('Database connection failed')),
+        ),
+        patch(
+            'server.routes.orgs.require_openhands_email_for_sandbox_limits',
+            AsyncMock(),
         ),
     ):
         client = TestClient(mock_app_with_get_user_id)
