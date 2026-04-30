@@ -21,7 +21,6 @@ from server.services.automation_event_service import AutomationEventService
 from openhands.app_server.integrations.provider import ProviderType
 from openhands.app_server.user_auth.user_auth import get_user_auth
 from openhands.app_server.utils.logger import openhands_logger as logger
-from openhands.core.logger import openhands_logger as logger
 
 # Environment variable to disable GitHub webhooks
 GITHUB_WEBHOOKS_ENABLED = os.environ.get('GITHUB_WEBHOOKS_ENABLED', '1') in (
