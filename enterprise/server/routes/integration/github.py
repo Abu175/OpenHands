@@ -20,7 +20,6 @@ from server.services.automation_event_service import AutomationEventService
 
 from openhands.app_server.integrations.provider import ProviderType
 from openhands.core.logger import openhands_logger as logger
-from openhands.integrations.provider import ProviderType
 from openhands.server.user_auth.user_auth import get_user_auth
 
 # Environment variable to disable GitHub webhooks

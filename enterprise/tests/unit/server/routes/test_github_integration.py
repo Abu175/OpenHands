@@ -89,7 +89,7 @@ class TestGetGitHubToken:
     @pytest.fixture
     def mock_saas_user_auth(self):
         """Create a mock SaasUserAuth object."""
-        from openhands.integrations.provider import ProviderToken, ProviderType
+        from openhands.app_server.integrations.provider import ProviderToken, ProviderType
 
         mock_auth = AsyncMock()
         mock_auth.get_provider_tokens = AsyncMock(
@@ -146,7 +146,7 @@ class TestGetGitHubToken:
         from fastapi import HTTPException
         from server.routes.integration.github import get_github_token
 
-        from openhands.integrations.provider import ProviderToken, ProviderType
+        from openhands.app_server.integrations.provider import ProviderToken, ProviderType
 
         mock_auth = AsyncMock()
         # Return GitLab token but no GitHub token
