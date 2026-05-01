@@ -271,6 +271,11 @@ describe("useNewConversationCommand", () => {
   });
 
   it("does not pass the ACP display label as an LLM model", async () => {
+    // ACP conversations store a human-readable label in llm_model (e.g. "ACP: claude-agent-acp")
+    // rather than a real model identifier. The new-conversation command must not forward this
+    // label as a model parameter — doing so would break LLM routing on the new conversation.
+    // conversation_url is null here because the test only exercises the model-parameter path;
+    // the ACP agent server URL is irrelevant to this assertion.
     vi.mocked(V1ConversationService.batchGetAppConversations).mockResolvedValue([
       {
         id: "conv-123",

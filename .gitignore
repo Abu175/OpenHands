@@ -260,4 +260,3 @@ runtime_*.tar
 test-results
 .sessions
 .eval_sessions
-frontend/node_modules
