@@ -105,3 +105,10 @@ export const METADATA_PREFIXES: readonly string[] = [
   "Skill location:",
   "(Use this path to resolve",
 ];
+
+/**
+ * Default concurrent sandbox limit for personal workspaces.
+ * This must match DEFAULT_PERSONAL_ORG_CONCURRENT_SANDBOXES in the backend
+ * (enterprise/server/constants.py).
+ */
+export const DEFAULT_CONCURRENT_SANDBOX_LIMIT = 3;

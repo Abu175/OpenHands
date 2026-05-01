@@ -3,7 +3,8 @@ import { AxiosError, AxiosHeaders } from "axios";
 import {
   isConcurrencyLimitError,
   getConcurrencyLimit,
-} from "./use-concurrency-limit-error";
+} from "#/utils/concurrency-limit-error";
+import { DEFAULT_CONCURRENT_SANDBOX_LIMIT } from "#/utils/constants";
 
 describe("isConcurrencyLimitError", () => {
   it("returns true for valid 429 concurrency limit error", () => {
@@ -134,7 +135,7 @@ describe("getConcurrencyLimit", () => {
     expect(getConcurrencyLimit(error)).toBe(5);
   });
 
-  it("returns default 3 when limit is missing", () => {
+  it("returns default limit when limit is missing", () => {
     const error = new AxiosError("Too Many Requests", "429", undefined, null, {
       status: 429,
       statusText: "Too Many Requests",
@@ -150,10 +151,10 @@ describe("getConcurrencyLimit", () => {
       },
     });
 
-    expect(getConcurrencyLimit(error)).toBe(3);
+    expect(getConcurrencyLimit(error)).toBe(DEFAULT_CONCURRENT_SANDBOX_LIMIT);
   });
 
-  it("returns default 3 when response data is null", () => {
+  it("returns default limit when response data is null", () => {
     const error = new AxiosError("Too Many Requests", "429", undefined, null, {
       status: 429,
       statusText: "Too Many Requests",
@@ -163,13 +164,13 @@ describe("getConcurrencyLimit", () => {
     });
 
     // @ts-expect-error - testing with invalid data type
-    expect(getConcurrencyLimit(error)).toBe(3);
+    expect(getConcurrencyLimit(error)).toBe(DEFAULT_CONCURRENT_SANDBOX_LIMIT);
   });
 
-  it("returns default 3 when response is undefined", () => {
+  it("returns default limit when response is undefined", () => {
     const error = new AxiosError("Network Error", "ERR_NETWORK");
     // @ts-expect-error - testing with no response
-    expect(getConcurrencyLimit(error)).toBe(3);
+    expect(getConcurrencyLimit(error)).toBe(DEFAULT_CONCURRENT_SANDBOX_LIMIT);
   });
 
   it("extracts different limit values correctly", () => {

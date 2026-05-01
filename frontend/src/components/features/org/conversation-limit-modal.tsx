@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { ModalBackdrop } from "#/components/shared/modals/modal-backdrop";
 import { BrandButton } from "#/components/features/settings/brand-button";
 import { I18nKey } from "#/i18n/declaration";
+import { DEFAULT_CONCURRENT_SANDBOX_LIMIT } from "#/utils/constants";
 
 interface ConversationLimitModalProps {
   onClose: () => void;
@@ -12,7 +13,7 @@ interface ConversationLimitModalProps {
 export function ConversationLimitModal({
   onClose,
   onLearnMore,
-  limit = 3,
+  limit = DEFAULT_CONCURRENT_SANDBOX_LIMIT,
 }: ConversationLimitModalProps) {
   const { t } = useTranslation();
 

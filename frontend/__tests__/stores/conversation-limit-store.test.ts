@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { useConversationLimitStore } from "./conversation-limit-store";
+import { useConversationLimitStore } from "#/stores/conversation-limit-store";
 
 describe("useConversationLimitStore", () => {
   beforeEach(() => {

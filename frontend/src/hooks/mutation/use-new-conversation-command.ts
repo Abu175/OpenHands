@@ -14,7 +14,7 @@ import { useConversationLimitStore } from "#/stores/conversation-limit-store";
 import {
   isConcurrencyLimitError,
   getConcurrencyLimit,
-} from "#/hooks/use-concurrency-limit-error";
+} from "#/utils/concurrency-limit-error";
 
 export const useNewConversationCommand = () => {
   const queryClient = useQueryClient();
