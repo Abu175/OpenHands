@@ -8,6 +8,7 @@ import { formatTimeDelta } from "#/utils/format-time-delta";
 import { I18nKey } from "#/i18n/declaration";
 import { SandboxStatusIndicator } from "./sandbox-status-indicator";
 import RepoForkedIcon from "#/icons/repo-forked.svg?react";
+import { Typography } from "#/ui/typography";
 import CircuitIcon from "#/icons/u-circuit.svg?react";
 
 interface RecentConversationProps {
@@ -75,9 +76,9 @@ export function RecentConversation({ conversation }: RecentConversationProps) {
               data-testid="recent-conversation-llm-model"
             >
               <CircuitIcon width={12} height={12} className="shrink-0" />
-              <span className="truncate">
+              <Typography.Text className="text-xs truncate">
                 {conversation.display_name ?? conversation.llm_model}
-              </span>
+              </Typography.Text>
             </span>
           )}
           {(conversation.created_at || conversation.updated_at) && (
