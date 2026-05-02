@@ -449,6 +449,7 @@ class TestProcessSandboxSpecEnvironmentOverride:
 
             # Check that default environment variables are still present
             assert 'OH_ENABLE_VS_CODE' in spec.initial_env
+            assert spec.working_dir == '/tmp/openhands-sandboxes'
 
     def test_process_specs_override_existing_variables(self):
         """Test that agent server env variables can override existing ones in process specs."""

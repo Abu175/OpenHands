@@ -178,16 +178,16 @@ class ProcessSandboxService(SandboxService):
         """Get the status of a process."""
         try:
             process = psutil.Process(process_info.pid)
-            if process.is_running():
-                status = process.status()
-                if status == psutil.STATUS_RUNNING:
-                    return SandboxStatus.RUNNING
-                elif status == psutil.STATUS_STOPPED:
-                    return SandboxStatus.PAUSED
-                else:
-                    return SandboxStatus.STARTING
-            else:
+            if not process.is_running():
                 return SandboxStatus.MISSING
+
+            status = process.status()
+            if status == psutil.STATUS_STOPPED:
+                return SandboxStatus.PAUSED
+            if status in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
+                return SandboxStatus.MISSING
+
+            return SandboxStatus.RUNNING
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return SandboxStatus.MISSING
 

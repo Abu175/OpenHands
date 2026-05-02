@@ -14,7 +14,7 @@ from openhands.app_server.sandbox.process_sandbox_service import (
     ProcessSandboxService,
     ProcessSandboxServiceInjector,
 )
-from openhands.app_server.sandbox.sandbox_models import SandboxStatus
+from openhands.app_server.sandbox.sandbox_models import AGENT_SERVER, SandboxStatus
 
 
 class MockSandboxSpec:
@@ -244,10 +244,10 @@ class TestProcessSandboxService:
         assert status == SandboxStatus.PAUSED
 
     @patch('psutil.Process')
-    def test_get_process_status_starting(
+    def test_get_process_status_sleeping_process_is_running(
         self, mock_process_class, process_sandbox_service
     ):
-        """Test getting process status for starting process."""
+        """Sleeping is a normal idle state for a ready agent server process."""
         mock_process = MagicMock()
         mock_process.is_running.return_value = True
         mock_process.status.return_value = psutil.STATUS_SLEEPING
@@ -264,7 +264,42 @@ class TestProcessSandboxService:
         )
 
         status = process_sandbox_service._get_process_status(process_info)
-        assert status == SandboxStatus.STARTING
+        assert status == SandboxStatus.RUNNING
+
+    @pytest.mark.asyncio
+    @patch('psutil.Process')
+    async def test_process_to_sandbox_info_sleeping_process_with_healthy_server(
+        self, mock_process_class, process_sandbox_service
+    ):
+        """A sleeping but responsive agent server should be exposed as running."""
+        mock_process = MagicMock()
+        mock_process.is_running.return_value = True
+        mock_process.status.return_value = psutil.STATUS_SLEEPING
+        mock_process_class.return_value = mock_process
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        process_sandbox_service.httpx_client.get.return_value = mock_response
+
+        process_info = ProcessInfo(
+            pid=1234,
+            port=9000,
+            user_id='test-user-id',
+            working_dir='/tmp/test',
+            session_api_key='test-key',
+            created_at=datetime.now(),
+            sandbox_spec_id='test-spec',
+        )
+
+        sandbox_info = await process_sandbox_service._process_to_sandbox_info(
+            'test-sandbox', process_info
+        )
+
+        assert sandbox_info.status == SandboxStatus.RUNNING
+        assert sandbox_info.session_api_key == 'test-key'
+        assert sandbox_info.exposed_urls is not None
+        assert sandbox_info.exposed_urls[0].name == AGENT_SERVER
+        assert sandbox_info.exposed_urls[0].url == 'http://localhost:9000'
 
     @patch('psutil.Process')
     def test_get_process_status_access_denied(
