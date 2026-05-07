@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 from server.routes.org_models import OrgUpdate
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -1153,6 +1154,54 @@ async def test_update_org_defaults_async_normalizes_legacy_agent_kind():
     assert result is not None
     assert result.agent_settings['agent_kind'] == 'openhands'
     assert result.agent_settings['llm']['model'] == 'new-model'
+
+@pytest.mark.asyncio
+async def test_update_org_defaults_async_rejects_explicit_legacy_agent_kind():
+    """GIVEN: An explicit legacy agent_kind in the incoming diff
+    WHEN: org defaults are patched
+    THEN: validation fails instead of silently rewriting user input
+    """
+    org_id = uuid.uuid4()
+    user_id = str(uuid.uuid4())
+    mock_org = Org(
+        id=org_id,
+        name='Explicit Agent Kind Organization',
+        agent_settings=OpenHandsAgentSettings(llm={'model': 'old-model'}),
+    )
+    update_data = OrgUpdate(
+        agent_settings_diff={
+            'agent_kind': 'llm',
+            'llm': {'model': 'new-model'},
+        }
+    )
+
+    mock_session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.first.return_value = mock_org
+    mock_session.execute.return_value = mock_result
+    mock_session.commit = AsyncMock()
+    mock_session.refresh = AsyncMock()
+
+    @asynccontextmanager
+    async def mock_a_session_maker():
+        yield mock_session
+
+    with (
+        patch('storage.org_store.a_session_maker', mock_a_session_maker),
+        patch(
+            'storage.org_store.OrgStore._maybe_get_managed_llm_key_for_user',
+            AsyncMock(return_value=None),
+        ),
+        patch(
+            'storage.org_member_store.OrgMemberStore.update_all_members_settings_async',
+            AsyncMock(),
+        ) as mock_member_update,
+    ):
+        with pytest.raises(ValidationError, match="Input should be 'openhands'"):
+            await OrgStore.update_org_defaults_async(org_id, update_data, user_id)
+
+    mock_member_update.assert_not_called()
+
 
 
 @pytest.mark.asyncio
