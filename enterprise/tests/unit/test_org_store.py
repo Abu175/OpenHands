@@ -1155,6 +1155,7 @@ async def test_update_org_defaults_async_normalizes_legacy_agent_kind():
     assert result.agent_settings['agent_kind'] == 'openhands'
     assert result.agent_settings['llm']['model'] == 'new-model'
 
+
 @pytest.mark.asyncio
 async def test_update_org_defaults_async_rejects_explicit_legacy_agent_kind():
     """GIVEN: An explicit legacy agent_kind in the incoming diff
@@ -1201,7 +1202,6 @@ async def test_update_org_defaults_async_rejects_explicit_legacy_agent_kind():
             await OrgStore.update_org_defaults_async(org_id, update_data, user_id)
 
     mock_member_update.assert_not_called()
-
 
 
 @pytest.mark.asyncio
