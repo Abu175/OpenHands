@@ -101,12 +101,11 @@ omit = [ "tests/*" ]
 [tool.importlinter]
 # Both packages must be listed so grimp can trace cross-package imports.
 # Run via: PYTHONPATH=enterprise lint-imports (from the repo root)
-root_packages = ["server", "integrations", "openhands"]
+root_packages = [ "server", "integrations", "openhands" ]
 
 [[tool.importlinter.contracts]]
 name = "server.verified_models must not import openhands.app_server.config"
 type = "forbidden"
 # Apply to the whole subpackage so both the router and the service are covered.
-source_modules = ["server.verified_models"]
-forbidden_modules = ["openhands.app_server.config"]
-
+source_modules = [ "server.verified_models" ]
+forbidden_modules = [ "openhands.app_server.config" ]
