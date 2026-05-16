@@ -1,6 +1,8 @@
 import glob
 import logging
+import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -35,11 +37,19 @@ class FilesystemEventService(EventServiceBase):
         content = event.model_dump_json(indent=2)
         path.write_text(content)
 
-    def _search_paths(self, prefix: Path, page_id: str | None = None) -> list[Path]:
+    def _search_paths(self, prefix: Path) -> list[tuple[Path, datetime | None]]:
         search_path = f'{prefix}/*'
         files = glob.glob(str(search_path))
-        paths = [Path(file) for file in files]
-        return paths
+        result: list[tuple[Path, datetime | None]] = []
+        for file in files:
+            path = Path(file)
+            try:
+                mtime = os.path.getmtime(file)
+                hint: datetime | None = datetime.fromtimestamp(mtime, tz=timezone.utc)
+            except OSError:
+                hint = None
+            result.append((path, hint))
+        return result
 
 
 class FilesystemEventServiceInjector(EventServiceInjector):

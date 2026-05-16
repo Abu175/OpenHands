@@ -388,6 +388,136 @@ class TestFilesystemEventServiceSearchEvents:
         assert result.items[0].id == event3.id
         assert result.items[1].id == event2.id
 
+    @pytest.mark.asyncio
+    async def test_initial_load_pattern_desc_with_limit(
+        self, service: FilesystemEventService
+    ):
+        """Verify sort_order=TIMESTAMP_DESC + limit returns the most-recent events.
+
+        This is the exact pattern the frontend uses on first open of a
+        conversation: GET /events/search?sort_order=TIMESTAMP_DESC&limit=50.
+        The result must contain the *newest* events (not the oldest), ordered
+        newest-first.
+        """
+        conversation_id = uuid4()
+        total = 10
+        limit = 3
+
+        saved = []
+        for _ in range(total):
+            e = create_token_event()
+            await service.save_event(conversation_id, e)
+            time.sleep(0.01)
+            saved.append(e)
+
+        result = await service.search_events(
+            conversation_id,
+            sort_order=EventSortOrder.TIMESTAMP_DESC,
+            limit=limit,
+        )
+
+        # Must return exactly `limit` items.
+        assert len(result.items) == limit
+
+        # The returned events must be the *newest* `limit` events.
+        expected_ids = {e.id for e in saved[-limit:]}
+        assert {e.id for e in result.items} == expected_ids
+
+        # They must be ordered newest-first.
+        returned_timestamps = [e.timestamp for e in result.items]
+        assert returned_timestamps == sorted(returned_timestamps, reverse=True)
+
+    @pytest.mark.asyncio
+    async def test_scroll_up_pagination_pattern(
+        self, service: FilesystemEventService
+    ):
+        """Verify sort_order=TIMESTAMP_DESC + timestamp__lt + limit returns events
+        just before the cutoff in newest-first order.
+
+        This is the exact pattern the frontend uses for scroll-up pagination:
+        GET /events/search?sort_order=TIMESTAMP_DESC&timestamp__lt=<oldest_ts>&limit=50
+        """
+        conversation_id = uuid4()
+
+        # Save 6 events.  After saving the 4th, note a cutoff time.
+        events_before_cutoff = []
+        for _ in range(3):
+            e = create_token_event()
+            await service.save_event(conversation_id, e)
+            time.sleep(0.01)
+            events_before_cutoff.append(e)
+
+        time.sleep(0.01)
+        cutoff = datetime.now()
+        time.sleep(0.01)
+
+        events_after_cutoff = []
+        for _ in range(3):
+            e = create_token_event()
+            await service.save_event(conversation_id, e)
+            time.sleep(0.01)
+            events_after_cutoff.append(e)
+
+        result = await service.search_events(
+            conversation_id,
+            timestamp__lt=cutoff,
+            sort_order=EventSortOrder.TIMESTAMP_DESC,
+            limit=10,
+        )
+
+        # Should only include the 3 events saved before the cutoff.
+        assert len(result.items) == 3
+        returned_ids = {e.id for e in result.items}
+        assert returned_ids == {e.id for e in events_before_cutoff}
+
+        # Ordered newest-first within the "before cutoff" group.
+        returned_timestamps = [e.timestamp for e in result.items]
+        assert returned_timestamps == sorted(returned_timestamps, reverse=True)
+
+    @pytest.mark.asyncio
+    async def test_hint_optimization_loads_only_needed_events(
+        self, service: FilesystemEventService
+    ):
+        """Verify that the hint-based fast path avoids loading all events.
+
+        When sort_order=TIMESTAMP_DESC + limit is used without a timestamp
+        filter, the filesystem mtime hints allow the implementation to load
+        only ``limit × _HINT_OVERSHOOT_FACTOR`` files instead of all N files.
+        We verify this by counting _load_event calls via a spy.
+        """
+        from unittest.mock import patch
+
+        from openhands.app_server.event.event_service_base import _HINT_OVERSHOOT_FACTOR
+
+        conversation_id = uuid4()
+        total = 20
+        limit = 3
+
+        for _ in range(total):
+            e = create_token_event()
+            await service.save_event(conversation_id, e)
+            time.sleep(0.01)
+
+        original_load = service._load_event
+        load_call_count = 0
+
+        def counting_load(path):
+            nonlocal load_call_count
+            load_call_count += 1
+            return original_load(path)
+
+        with patch.object(service, '_load_event', side_effect=counting_load):
+            result = await service.search_events(
+                conversation_id,
+                sort_order=EventSortOrder.TIMESTAMP_DESC,
+                limit=limit,
+            )
+
+        assert len(result.items) == limit
+        # Must have loaded at most limit × overshoot events, not all `total`.
+        assert load_call_count <= limit * _HINT_OVERSHOOT_FACTOR
+        assert load_call_count < total
+
 
 class TestFilesystemEventServiceIntegration:
     """Integration tests for FilesystemEventService."""

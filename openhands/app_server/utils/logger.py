@@ -20,14 +20,18 @@ from openhands.sdk.utils.redact import (
     redact_url_params,
 )
 
-# Suppress deprecation warnings from dependencies before they're imported
-# aifc was removed in Python 3.13 but speech_recognition still references it
-with warnings.catch_warnings():
-    warnings.simplefilter('ignore')
-    import aifc
+# Suppress deprecation warnings from dependencies before they're imported.
+# aifc was removed in Python 3.13 but speech_recognition still references it;
+# stub it out so the library can be imported on 3.13+ without errors.
+try:
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        import aifc  # noqa: F401
+except ModuleNotFoundError:
+    import sys
+    import types
 
-    # Stop the linter from deleting the import
-    _AIFC = aifc.__name__
+    sys.modules.setdefault('aifc', types.ModuleType('aifc'))
 
 warnings.filterwarnings('ignore', category=SyntaxWarning, module=r'pydub\.utils')
 

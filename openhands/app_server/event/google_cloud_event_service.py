@@ -3,6 +3,7 @@
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import AsyncGenerator, Iterator
@@ -61,13 +62,20 @@ class GoogleCloudEventService(EventServiceBase):
         with blob.open('w') as f:
             f.write(json.dumps(data, indent=2))
 
-    def _search_paths(self, prefix: Path, page_id: str | None = None) -> list[Path]:
-        """Search paths."""
-        blobs: Iterator[Blob] = self.bucket.list_blobs(
-            page_token=page_id, prefix=str(prefix)
-        )
-        paths = list(Path(blob.name) for blob in blobs)
-        return paths
+    def _search_paths(self, prefix: Path) -> list[tuple[Path, datetime | None]]:
+        """Return all event paths under *prefix* with GCS time_created as hint.
+
+        ``list_blobs`` returns ``Blob`` objects whose ``time_created`` attribute
+        is a timezone-aware ``datetime``.  We include it as a hint so the base
+        class can pre-sort and pre-filter candidates without loading each event.
+        GCS's ``HTTPIterator`` paginates automatically, so all blobs are
+        returned in a single call to this method.
+        """
+        blobs: Iterator[Blob] = self.bucket.list_blobs(prefix=str(prefix))
+        result: list[tuple[Path, datetime | None]] = []
+        for blob in blobs:
+            result.append((Path(blob.name), blob.time_created))
+        return result
 
 
 class GoogleCloudEventServiceInjector(EventServiceInjector):
