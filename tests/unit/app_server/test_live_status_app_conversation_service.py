@@ -3738,3 +3738,44 @@ class TestSynthesizeAcpResumeInitialMessage:
         assert 'input=' in text
         assert 'auth.py' in text
         assert 'output=ok' in text
+
+    @pytest.mark.asyncio
+    async def test_long_conversation_truncated_to_max_chars(self, service):
+        """Output is capped at _ACP_RESUME_CONTEXT_MAX_CHARS and ends with '...'."""
+        from openhands.app_server.app_conversation.live_status_app_conversation_service import (
+            _ACP_RESUME_CONTEXT_MAX_CHARS,
+        )
+
+        long_text = 'x' * 10_000
+        # 10 events × 10k chars each far exceeds the 60k limit
+        events = [self._make_message_event('user', long_text) for _ in range(10)]
+        service.event_service.search_events = AsyncMock(
+            return_value=self._make_page(events)
+        )
+
+        result = await service._synthesize_acp_resume_initial_message(uuid4())
+
+        assert result is not None
+        text = result.content[0].text
+        assert len(text) <= _ACP_RESUME_CONTEXT_MAX_CHARS
+        assert text.endswith('...')
+
+    @pytest.mark.asyncio
+    async def test_event_count_cap_stops_pagination(self, service):
+        """Pagination stops at _ACP_RESUME_MAX_EVENTS even if more pages exist."""
+        from openhands.agent_server.models import EventPage
+        from openhands.app_server.app_conversation.live_status_app_conversation_service import (
+            _ACP_RESUME_MAX_EVENTS,
+        )
+
+        # Each page has 100 events; cap is 200 so we should stop after 2 pages.
+        page_of_100 = EventPage(
+            items=[self._make_message_event('user', f'msg') for _ in range(100)],
+            next_page_id='more',
+        )
+        service.event_service.search_events = AsyncMock(return_value=page_of_100)
+
+        result = await service._synthesize_acp_resume_initial_message(uuid4())
+
+        assert result is not None
+        assert service.event_service.search_events.call_count == _ACP_RESUME_MAX_EVENTS // 100

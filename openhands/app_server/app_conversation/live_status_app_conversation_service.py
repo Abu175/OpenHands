@@ -122,7 +122,8 @@ from openhands.tools.preset.planning import (
 _conversation_info_type_adapter = TypeAdapter(list[ConversationInfo | None])
 _logger = logging.getLogger(__name__)
 
-# Character limits for bootstrap-prompt resume (Solution A of issue #14260).
+# Limits for bootstrap-prompt resume (Solution A of issue #14260).
+_ACP_RESUME_MAX_EVENTS = 200            # hard event-count cap (prevents O(N) fetches)
 _ACP_RESUME_CONTEXT_MAX_CHARS = 60_000  # total resume block
 _ACP_RESUME_MESSAGE_MAX_CHARS = 8_000   # per message turn
 _ACP_RESUME_TOOL_MAX_CHARS = 2_000      # per tool event
@@ -1494,13 +1495,14 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             ):
                 return initial_message
 
-        # Fetch newest-first so that when the conversation is very long we keep
-        # the most recent context.  Pagination stops once the rendered text would
-        # exceed _ACP_RESUME_CONTEXT_MAX_CHARS anyway.
+        # Fetch newest-first so that when the conversation exceeds
+        # _ACP_RESUME_MAX_EVENTS we keep the most recent context, not the oldest.
+        # The count cap avoids O(N) fetches for very long conversations; the
+        # character cap (_ACP_RESUME_CONTEXT_MAX_CHARS) is applied at render time.
         all_events: list = []
         try:
             page_id: str | None = None
-            while True:
+            while len(all_events) < _ACP_RESUME_MAX_EVENTS:
                 page = await self.event_service.search_events(
                     conversation_id,
                     sort_order=EventSortOrder.TIMESTAMP_DESC,
@@ -1508,6 +1510,9 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                     limit=100,
                 )
                 all_events.extend(page.items)
+                if len(all_events) >= _ACP_RESUME_MAX_EVENTS:
+                    all_events = all_events[:_ACP_RESUME_MAX_EVENTS]
+                    break
                 if page.next_page_id is None:
                     break
                 page_id = page.next_page_id
