@@ -94,6 +94,7 @@ from openhands.app_server.utils.llm_metadata import (
     should_set_litellm_extra_body,
 )
 from openhands.sdk import Agent, AgentContext, LocalWorkspace
+from openhands.sdk.agent.acp_agent import ACPAgent
 from openhands.sdk.hooks import HookConfig
 from openhands.sdk.llm import LLM
 from openhands.sdk.plugin import PluginSource
@@ -1412,6 +1413,43 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
 
         return request
 
+    @staticmethod
+    def _acp_provider_env(user: UserInfo) -> dict[str, str]:
+        """Translate UI-saved LLM API key into the provider-native env var."""
+        if not isinstance(user.agent_settings, ACPAgentSettings):
+            return {}
+
+        acp_settings = user.agent_settings
+        env: dict[str, str] = {}
+
+        llm_api_key = acp_settings.llm.api_key
+        if not llm_api_key:
+            return env
+
+        key_value = (
+            llm_api_key.get_secret_value()
+            if isinstance(llm_api_key, SecretStr)
+            else str(llm_api_key)
+        )
+        if not key_value or not key_value.strip():
+            return env
+
+        # TODO: simplify to `acp_settings.api_key_env_var` once OpenHands is
+        # pinned to an SDK version that includes software-agent-sdk PR #2984.
+        api_key_env: str | None = getattr(acp_settings, 'api_key_env_var', None)
+        if api_key_env is None:
+            _SERVER_KEY_MAP = {
+                'claude-code': 'ANTHROPIC_API_KEY',
+                'codex': 'OPENAI_API_KEY',
+                'gemini-cli': 'GEMINI_API_KEY',
+            }
+            api_key_env = _SERVER_KEY_MAP.get(acp_settings.acp_server)
+
+        if api_key_env:
+            env[api_key_env] = key_value
+
+        return env
+
     async def _load_skills_onto_request(
         self,
         request: StartConversationRequest,
@@ -1500,20 +1538,32 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         acp_settings = user.agent_settings  # already verified to be ACPAgentSettings
         assert isinstance(acp_settings, ACPAgentSettings)
 
-        # Pass user secrets via AgentContext. The SDK renders them as a
-        # <CUSTOM_SECRETS> block in the ACP prompt (so the agent knows the
-        # names) and ``ACPAgent._start_acp_server`` gap-fills any that
-        # aren't already in ``acp_env`` into the subprocess env at launch
-        # time — preserving the ``acp_env > provider env > secrets``
-        # precedence end-to-end. We pass ``SecretSource`` objects through
-        # verbatim; resolving them here (with ``source.get_value()``) would
-        # eagerly hit the auth service for every ``LookupSecret`` on every
-        # conversation start, from the wrong process.
+        # Merge provider env vars (LLM-profile API key → provider-native var)
+        # with the user-configured acp_env. User secrets named like
+        # ``CLAUDE_CODE_OAUTH_TOKEN``, ``OPENAI_API_KEY``, ``CODEX_AUTH_JSON``,
+        # ``GOOGLE_APPLICATION_CREDENTIALS_JSON`` flow through
+        # ``AgentContext.secrets`` and are handled by ``ACPAgent`` itself
+        # (plain values become env vars; reserved names get materialised as
+        # files via the SDK's file-secret registry). Priority (highest →
+        # lowest): user secrets > acp_env > provider_env.
+        merged_env: dict[str, str] = {
+            **self._acp_provider_env(user),
+            **dict(acp_settings.acp_env or {}),
+        }
+
+        # Pass user secrets via AgentContext so the SDK renders a <CUSTOM_SECRETS>
+        # block in the ACP prompt and injects values into the subprocess env.
         agent_context = AgentContext(secrets=secrets) if secrets else None
-        settings_update = (
-            {'agent_context': agent_context} if agent_context is not None else {}
+
+        acp_agent = ACPAgent(
+            acp_command=acp_settings.acp_command,
+            acp_args=acp_settings.acp_args,
+            acp_env=merged_env,
+            acp_model=acp_settings.acp_model,
+            acp_session_mode=acp_settings.acp_session_mode,
+            acp_prompt_timeout=acp_settings.acp_prompt_timeout,
+            agent_context=agent_context,
         )
-        acp_agent = acp_settings.model_copy(update=settings_update).create_agent()
 
         sdk_plugins: list[PluginSource] | None = None
         if plugins:

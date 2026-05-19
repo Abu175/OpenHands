@@ -8,6 +8,7 @@ import AgentSettingsScreen from "#/routes/agent-settings";
 import SettingsService from "#/api/settings-service/settings-service.api";
 import OptionService from "#/api/option-service/option-service.api";
 import type { ACPProviderConfig } from "#/api/option-service/option.types";
+import { SecretsService } from "#/api/secrets-service";
 import { MOCK_DEFAULT_USER_SETTINGS } from "#/mocks/handlers";
 import { useSelectedOrganizationStore } from "#/stores/selected-organization-store";
 
@@ -276,5 +277,129 @@ describe("AgentSettingsScreen — minimal generic ACP UX", () => {
       "placeholder",
       "npx -y <package-name>",
     );
+  });
+});
+
+describe("AgentSettingsScreen — subscription auth info panels", () => {
+  const acpClaudeCodeSettings = {
+    ...MOCK_DEFAULT_USER_SETTINGS,
+    agent_settings: {
+      agent_kind: "acp",
+      acp_server: "custom",
+      acp_command: ["npx", "-y", "@agentclientprotocol/claude-agent-acp"],
+      acp_args: [],
+      acp_env: {},
+      acp_model: null,
+    },
+  };
+  const acpCodexSettings = {
+    ...MOCK_DEFAULT_USER_SETTINGS,
+    agent_settings: {
+      agent_kind: "acp",
+      acp_server: "custom",
+      acp_command: ["npx", "-y", "@zed-industries/codex-acp"],
+      acp_args: [],
+      acp_env: {},
+      acp_model: null,
+    },
+  };
+
+  beforeEach(() => {
+    vi.spyOn(OptionService, "getConfig").mockResolvedValue(baseConfig);
+    vi.spyOn(SecretsService, "searchSecrets").mockResolvedValue({
+      items: [],
+      next_page_id: null,
+    });
+  });
+
+  it("shows the Claude info panel under the Claude Code preset", async () => {
+    vi.spyOn(SettingsService, "getSettings").mockResolvedValue(
+      acpClaudeCodeSettings,
+    );
+    renderAgentSettings();
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("claude-subscription-info"),
+      ).toBeInTheDocument();
+    });
+    // The info panel surfaces the magic secret name the user must create.
+    const panel = screen.getByTestId("claude-subscription-info");
+    expect(panel).toHaveTextContent("CLAUDE_CODE_OAUTH_TOKEN");
+    // No info panel from the other preset.
+    expect(
+      screen.queryByTestId("codex-subscription-info"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the Codex info panel under the Codex preset", async () => {
+    vi.spyOn(SettingsService, "getSettings").mockResolvedValue(
+      acpCodexSettings,
+    );
+    renderAgentSettings();
+    await waitFor(() => {
+      expect(screen.getByTestId("codex-subscription-info")).toBeInTheDocument();
+    });
+    const panel = screen.getByTestId("codex-subscription-info");
+    expect(panel).toHaveTextContent("CODEX_AUTH_JSON");
+    expect(
+      screen.queryByTestId("claude-subscription-info"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the 'detected' badge when the Claude OAuth secret is set", async () => {
+    vi.spyOn(SettingsService, "getSettings").mockResolvedValue(
+      acpClaudeCodeSettings,
+    );
+    vi.spyOn(SecretsService, "searchSecrets").mockResolvedValue({
+      items: [
+        {
+          name: "CLAUDE_CODE_OAUTH_TOKEN",
+          description: "Claude Max OAuth access token",
+        },
+      ],
+      next_page_id: null,
+    });
+    renderAgentSettings();
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("claude-subscription-info-detected"),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByTestId("claude-subscription-info-missing"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows 'missing' badge when the Codex auth secret is not set", async () => {
+    vi.spyOn(SettingsService, "getSettings").mockResolvedValue(
+      acpCodexSettings,
+    );
+    renderAgentSettings();
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("codex-subscription-info-missing"),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("shows the 'detected' badge when the Codex auth secret is set", async () => {
+    vi.spyOn(SettingsService, "getSettings").mockResolvedValue(
+      acpCodexSettings,
+    );
+    vi.spyOn(SecretsService, "searchSecrets").mockResolvedValue({
+      items: [
+        {
+          name: "CODEX_AUTH_JSON",
+          description: "Codex ChatGPT auth.json",
+        },
+      ],
+      next_page_id: null,
+    });
+    renderAgentSettings();
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("codex-subscription-info-detected"),
+      ).toBeInTheDocument();
+    });
   });
 });
