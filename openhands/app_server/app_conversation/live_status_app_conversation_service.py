@@ -124,6 +124,21 @@ _conversation_info_type_adapter = TypeAdapter(list[ConversationInfo | None])
 _logger = logging.getLogger(__name__)
 
 # Limits for bootstrap-prompt resume (Solution A of issue #14260).
+#
+# TODO(#14474): Once `software-agent-sdk` is pinned to a version that includes
+# OpenHands/software-agent-sdk#3323, replace the constants and helpers below
+# with imports from `openhands.sdk.event`:
+#   * `_ACP_RESUME_CONTEXT_MARKER` → `RESUME_CONTEXT_MARKER`
+#   * `_content_to_text` → drop (covered by SDK's `content_to_str`)
+#   * `_is_patch_edit` → use `ACPToolCallEvent.is_patch_edit`
+#   * the event-walking loop in `_synthesize_acp_resume_initial_message`
+#     → `render_resume_transcript(events, max_chars=…, max_message_chars=…,
+#         max_tool_chars=…, marker=RESUME_CONTEXT_MARKER)`.
+# The fetch/pagination wrapper, double-resume guard, and provider-specific
+# scrubbing (`_sanitize_paths`, `_strip_terminal_boilerplate`,
+# `_extract_output_text`, `_format_raw_input`, `_RAW_INPUT_NOISE_KEYS`) stay
+# on the OpenHands side — they encode app-server / Codex-shape concerns the
+# SDK protocol layer deliberately doesn't know about.
 _ACP_RESUME_MAX_EVENTS = 200  # hard event-count cap (prevents O(N) fetches)
 _ACP_RESUME_CONTEXT_MAX_CHARS = 60_000  # total resume block
 _ACP_RESUME_MESSAGE_MAX_CHARS = 8_000  # per message turn
@@ -1664,6 +1679,10 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         so ``session/load`` cannot be used.  Instead we start a fresh
         ``new_session`` and inject the prior event history as the first user
         message (Solution A of issue #14260).
+
+        TODO(#14474): Replace the event-walking loop below with
+        ``openhands.sdk.event.render_resume_transcript`` once the SDK pin
+        includes OpenHands/software-agent-sdk#3323. See top-of-file note.
 
         Returns ``None`` when there are no prior events (fresh conversation).
         If ``initial_message`` is provided it is appended after the history block
