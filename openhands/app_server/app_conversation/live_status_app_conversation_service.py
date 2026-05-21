@@ -135,6 +135,39 @@ Your role ends when the plan is finalized. Implementation is handled by the code
 </IMPORTANT_PLANNING_BOUNDARIES>"""
 
 
+# --- ACP session-resume persistence (issue #14260, Solution B) -------------
+#
+# Root directory inside the runtime sandbox for ACP server session storage.
+# ``/workspace`` is the PVC mount that survives sandbox recycles (its
+# ownerReference points to the Deployment, not the Pod), so pointing each
+# ACP server's data directory into a subdirectory here lets the server load
+# its own past sessions on a fresh sandbox.
+_ACP_PERSIST_ROOT: str = '/workspace'
+
+# Per-provider env var that redirects the ACP server's data directory.
+# Gemini CLI has no equivalent env var and is intentionally omitted —
+# for Gemini, native ``session/load`` resume is not viable; the bootstrap-
+# prompt resume (Solution A) remains the fallback there.
+_ACP_PERSIST_ENV_BY_SERVER: dict[str, tuple[str, str]] = {
+    'claude-code': ('CLAUDE_CONFIG_DIR', '.claude'),
+    'codex': ('CODEX_HOME', '.codex'),
+}
+
+
+def _acp_persist_env(acp_server: str) -> dict[str, str]:
+    """Return env vars that relocate an ACP server's data dir onto /workspace.
+
+    Returns an empty dict for providers without a relocation env var
+    (e.g. ``gemini-cli``) or for ``acp_server='custom'`` where the user
+    already manages their own environment via :attr:`acp_env`.
+    """
+    spec = _ACP_PERSIST_ENV_BY_SERVER.get(acp_server)
+    if spec is None:
+        return {}
+    env_var, subdir = spec
+    return {env_var: f'{_ACP_PERSIST_ROOT}/{subdir}'}
+
+
 @dataclass
 class LiveStatusAppConversationService(AppConversationServiceBase):
     """AppConversationService which combines live status info from the sandbox with stored data."""
@@ -1520,6 +1553,18 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         acp_settings = user.agent_settings  # already verified to be ACPAgentSettings
         assert isinstance(acp_settings, ACPAgentSettings)
 
+        # Relocate the ACP server's own session storage onto the persistent
+        # /workspace volume.  Without this, Claude Code / Codex store
+        # sessions in ``$HOME``, which is wiped on sandbox recycle — and
+        # ``session/load`` then has nothing to load even when we hand it a
+        # valid session id.  Explicit user-set entries in ``acp_env`` win
+        # over our defaults so power users can override the path.
+        persist_env = _acp_persist_env(acp_settings.acp_server)
+        merged_acp_env: dict[str, str] = {
+            **persist_env,
+            **dict(acp_settings.acp_env or {}),
+        }
+
         # Pass user secrets via AgentContext. The SDK renders them as a
         # <CUSTOM_SECRETS> block in the ACP prompt (so the agent knows the
         # names) and ``ACPAgent._start_acp_server`` gap-fills any that
@@ -1530,10 +1575,34 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         # eagerly hit the auth service for every ``LookupSecret`` on every
         # conversation start, from the wrong process.
         agent_context = AgentContext(secrets=secrets) if secrets else None
-        settings_update = (
-            {'agent_context': agent_context} if agent_context is not None else {}
-        )
+        settings_update: dict[str, Any] = {'acp_env': merged_acp_env}
+        if agent_context is not None:
+            settings_update['agent_context'] = agent_context
         acp_agent = acp_settings.model_copy(update=settings_update).create_agent()
+
+        # Hand the agent the durable session id (if any) so a fresh sandbox
+        # can resume the prior ACP session even though ``base_state.json``
+        # was wiped along with the previous sandbox FS.  The id was mirrored
+        # by the webhook ``on_event`` handler each time the SDK autosaved
+        # ``state.agent_state``.  ``ACPAgent`` falls back to ``new_session``
+        # if the ACP server can no longer load the id.
+        #
+        # TODO: drop the ``_sdk_supports_acp_resume_session_id`` guard once
+        # OpenHands pins to an SDK release that includes
+        # ``ACPAgent.acp_resume_session_id``.
+        _sdk_supports_acp_resume_session_id = (
+            'acp_resume_session_id' in type(acp_agent).model_fields
+        )
+        if _sdk_supports_acp_resume_session_id:
+            existing_info = (
+                await self.app_conversation_info_service.get_app_conversation_info(
+                    conversation_id
+                )
+            )
+            if existing_info and existing_info.acp_session_id:
+                acp_agent = acp_agent.model_copy(
+                    update={'acp_resume_session_id': existing_info.acp_session_id}
+                )
 
         sdk_plugins: list[PluginSource] | None = None
         if plugins:

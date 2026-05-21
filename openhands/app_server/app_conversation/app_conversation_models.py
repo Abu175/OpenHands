@@ -114,6 +114,15 @@ class AppConversationInfo(BaseModel):
     # Tags for conversation metadata (e.g., automation context, skills used)
     tags: dict[str, str] = Field(default_factory=dict)
 
+    # ACP resume state — mirrored from the SDK's ``agent_state`` so the
+    # session id and the cwd it was created under survive sandbox recycles.
+    # On the next launch, the app-server passes ``acp_session_id`` back to
+    # the SDK via :attr:`~openhands.sdk.agent.ACPAgent.acp_resume_session_id`,
+    # which drives ``session/load`` instead of starting a fresh session.
+    # Only set when ``agent_kind == 'acp'``.
+    acp_session_id: str | None = None
+    acp_session_cwd: str | None = None
+
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

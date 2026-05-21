@@ -425,6 +425,35 @@ async def on_event(
                     event, conversation_id
                 )
 
+        # Mirror ACP session id / cwd into durable storage so we can resume
+        # after a sandbox recycle wipes the SDK's per-conversation
+        # base_state.json.  The SDK autosaves agent_state on assignment;
+        # ACPAgent.init_state assigns acp_session_id and acp_session_cwd into
+        # it, which fires a ConversationStateUpdateEvent(key='agent_state').
+        for event in events:
+            if not isinstance(event, ConversationStateUpdateEvent):
+                continue
+            if event.key != 'agent_state':
+                continue
+            agent_state = event.value if isinstance(event.value, dict) else None
+            if agent_state is None:
+                continue
+            acp_session_id = agent_state.get('acp_session_id')
+            acp_session_cwd = agent_state.get('acp_session_cwd')
+            # Only persist when the ACP-specific keys are present; other
+            # agent_state writes (from non-ACP agents) are ignored.
+            if acp_session_id is None and acp_session_cwd is None:
+                continue
+            try:
+                await app_conversation_info_service.update_acp_session(
+                    conversation_id, acp_session_id, acp_session_cwd
+                )
+            except Exception:
+                _logger.exception(
+                    'Error mirroring ACP session id for conversation %s',
+                    conversation_id,
+                )
+
         # Analytics: conversation terminal state detection
         for event in events:
             if not isinstance(event, ConversationStateUpdateEvent):

@@ -116,6 +116,25 @@ class AppConversationInfoService(ABC):
             conversation_id: The ID of the conversation to update
         """
 
+    @abstractmethod
+    async def update_acp_session(
+        self,
+        conversation_id: UUID,
+        acp_session_id: str | None,
+        acp_session_cwd: str | None,
+    ) -> None:
+        """Mirror ``state.agent_state['acp_session_id'|'acp_session_cwd']``.
+
+        Called from the webhook ``on_event`` handler when an agent_state
+        ``ConversationStateUpdateEvent`` arrives.  Persists the id and cwd
+        so the next sandbox launch (post-recycle) can pass them back to the
+        SDK via ``ACPAgent.acp_resume_session_id``.
+
+        ``None`` values are written as-is so a server-initiated reset
+        (e.g. ``load_session`` failure → ``new_session``) clears the column
+        and overwrites it with the replacement id on the next event.
+        """
+
 
 class AppConversationInfoServiceInjector(
     DiscriminatedUnionMixin, Injector[AppConversationInfoService], ABC

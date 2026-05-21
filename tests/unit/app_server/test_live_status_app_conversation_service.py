@@ -3158,10 +3158,16 @@ class TestBuildAcpStartConversationRequestSecrets:
     @pytest.fixture
     def service(self):
         mock_user_context = Mock(spec=UserContext)
+        # Default the resume-id lookup to "no prior conversation" so existing
+        # tests that don't care about resume can stay focused on secrets only.
+        # Individual resume tests override this with a record that has an
+        # ``acp_session_id`` set.
+        mock_info_service = Mock()
+        mock_info_service.get_app_conversation_info = AsyncMock(return_value=None)
         return LiveStatusAppConversationService(
             init_git_in_empty_workspace=True,
             user_context=mock_user_context,
-            app_conversation_info_service=Mock(),
+            app_conversation_info_service=mock_info_service,
             app_conversation_start_task_service=Mock(),
             event_callback_service=Mock(),
             event_service=Mock(),
@@ -3379,3 +3385,199 @@ class TestBuildAcpStartConversationRequestSecrets:
         request = await self._call_build(service, user, tmp_path)
 
         assert request.agent.acp_env.get('GH_TOKEN') == 'explicit-token'
+
+
+class TestBuildAcpStartConversationRequestPersistence:
+    """Tests for ACP session-resume persistence (issue #14260, Solution B).
+
+    Two complementary pieces:
+
+    1. ``CLAUDE_CONFIG_DIR`` / ``CODEX_HOME`` are injected into ``acp_env`` so
+       each ACP server's own session storage lands on the persistent
+       ``/workspace`` PVC, surviving sandbox recycles.
+    2. ``acp_resume_session_id`` is set on the ``ACPAgent`` from the
+       durably-mirrored ``AppConversationInfo.acp_session_id`` so the SDK
+       calls ``session/load`` on the next launch even after a sandbox
+       recycle wiped the per-conversation ``base_state.json``.
+    """
+
+    @pytest.fixture
+    def info_service(self):
+        mock = Mock()
+        mock.get_app_conversation_info = AsyncMock(return_value=None)
+        return mock
+
+    @pytest.fixture
+    def service(self, info_service):
+        mock_user_context = Mock(spec=UserContext)
+        return LiveStatusAppConversationService(
+            init_git_in_empty_workspace=True,
+            user_context=mock_user_context,
+            app_conversation_info_service=info_service,
+            app_conversation_start_task_service=Mock(),
+            event_callback_service=Mock(),
+            event_service=Mock(),
+            sandbox_service=Mock(),
+            sandbox_spec_service=Mock(),
+            jwt_service=Mock(),
+            pending_message_service=Mock(),
+            sandbox_startup_timeout=30,
+            sandbox_startup_poll_frequency=1,
+            max_num_conversations_per_sandbox=20,
+            httpx_client=Mock(),
+            web_url=None,
+            openhands_provider_base_url=None,
+            access_token_hard_timeout=None,
+            app_mode='test',
+        )
+
+    def _make_acp_user(self, acp_server='claude-code', acp_env=None, api_key=None):
+        try:
+            from openhands.sdk.settings import (
+                ACPAgentSettings,  # type: ignore[attr-defined]
+            )
+        except ImportError:
+            pytest.skip('ACPAgentSettings not available in this SDK build')
+
+        user = _TestUserInfo(
+            id='user1',
+            llm_model='',
+            llm_base_url=None,
+            llm_api_key=None,
+            sandbox_grouping_strategy=SandboxGroupingStrategy.ADD_TO_ANY,
+            confirmation_mode=False,
+            security_analyzer=None,
+            search_api_key=None,
+            mcp_config=None,
+            disabled_skills=[],
+        )
+        user.agent_settings = ACPAgentSettings(
+            acp_server=acp_server,  # type: ignore[arg-type]
+            llm=LLM(
+                model='claude-sonnet-4-5',
+                api_key=SecretStr(api_key) if api_key else None,
+            ),
+            acp_env=acp_env or {},
+        )
+        return user
+
+    async def _call_build(self, service, user, tmp_path, conversation_id=None):
+        service.user_context.get_user_info = AsyncMock(return_value=user)
+        service._setup_secrets_for_git_providers = AsyncMock(return_value={})
+        sandbox = Mock(spec=SandboxInfo)
+        return await service._build_acp_start_conversation_request(
+            sandbox=sandbox,
+            conversation_id=conversation_id or uuid4(),
+            initial_message=None,
+            working_dir=str(tmp_path),
+            plugins=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_claude_code_injects_claude_config_dir(self, service, tmp_path):
+        """``claude-code`` gets ``CLAUDE_CONFIG_DIR=/workspace/.claude``."""
+        user = self._make_acp_user(acp_server='claude-code')
+
+        request = await self._call_build(service, user, tmp_path)
+
+        assert request.agent.acp_env.get('CLAUDE_CONFIG_DIR') == '/workspace/.claude'
+        # CODEX_HOME must not leak across providers.
+        assert 'CODEX_HOME' not in request.agent.acp_env
+
+    @pytest.mark.asyncio
+    async def test_codex_injects_codex_home(self, service, tmp_path):
+        """``codex`` gets ``CODEX_HOME=/workspace/.codex``."""
+        user = self._make_acp_user(acp_server='codex')
+
+        request = await self._call_build(service, user, tmp_path)
+
+        assert request.agent.acp_env.get('CODEX_HOME') == '/workspace/.codex'
+        assert 'CLAUDE_CONFIG_DIR' not in request.agent.acp_env
+
+    @pytest.mark.asyncio
+    async def test_gemini_cli_does_not_inject_persistence_env(self, service, tmp_path):
+        """Gemini CLI has no relocation env var; no var must be injected.
+
+        For Gemini, native session/load resume is not viable; Solution A
+        (bootstrap-prompt resume) remains the fallback.
+        """
+        user = self._make_acp_user(acp_server='gemini-cli')
+
+        request = await self._call_build(service, user, tmp_path)
+
+        assert 'CLAUDE_CONFIG_DIR' not in request.agent.acp_env
+        assert 'CODEX_HOME' not in request.agent.acp_env
+
+    @pytest.mark.asyncio
+    async def test_user_set_claude_config_dir_overrides_default(
+        self, service, tmp_path
+    ):
+        """A user-set ``CLAUDE_CONFIG_DIR`` in ``acp_env`` wins over the default.
+
+        Lets power users opt out of the default persist location.
+        """
+        user = self._make_acp_user(
+            acp_server='claude-code',
+            acp_env={'CLAUDE_CONFIG_DIR': '/custom/claude/path'},
+        )
+
+        request = await self._call_build(service, user, tmp_path)
+
+        assert request.agent.acp_env.get('CLAUDE_CONFIG_DIR') == '/custom/claude/path'
+
+    @pytest.mark.asyncio
+    async def test_acp_resume_session_id_passed_when_stored(
+        self, service, info_service, tmp_path
+    ):
+        """Stored ``acp_session_id`` flows to ``ACPAgent.acp_resume_session_id``.
+
+        Skipped if the pinned SDK doesn't yet expose the field.
+        """
+        from openhands.app_server.app_conversation.app_conversation_models import (
+            AppConversationInfo,
+        )
+
+        user = self._make_acp_user(acp_server='claude-code')
+        try:
+            from openhands.sdk.agent import ACPAgent  # type: ignore[attr-defined]
+        except ImportError:
+            pytest.skip('ACPAgent not importable in this SDK build')
+        if 'acp_resume_session_id' not in ACPAgent.model_fields:
+            pytest.skip('SDK does not expose acp_resume_session_id yet')
+
+        conv_id = uuid4()
+        info_service.get_app_conversation_info = AsyncMock(
+            return_value=AppConversationInfo(
+                id=conv_id,
+                created_by_user_id='user1',
+                sandbox_id='sb-1',
+                agent_kind='acp',
+                acp_session_id='durable-sess-from-db',
+                acp_session_cwd=str(tmp_path),
+            )
+        )
+
+        request = await self._call_build(
+            service, user, tmp_path, conversation_id=conv_id
+        )
+
+        assert request.agent.acp_resume_session_id == 'durable-sess-from-db'
+
+    @pytest.mark.asyncio
+    async def test_no_resume_id_when_no_stored_session(
+        self, service, info_service, tmp_path
+    ):
+        """Fresh conversation: no record yet, no ``acp_resume_session_id``."""
+        try:
+            from openhands.sdk.agent import ACPAgent  # type: ignore[attr-defined]
+        except ImportError:
+            pytest.skip('ACPAgent not importable in this SDK build')
+        if 'acp_resume_session_id' not in ACPAgent.model_fields:
+            pytest.skip('SDK does not expose acp_resume_session_id yet')
+
+        info_service.get_app_conversation_info = AsyncMock(return_value=None)
+        user = self._make_acp_user(acp_server='claude-code')
+
+        request = await self._call_build(service, user, tmp_path)
+
+        assert request.agent.acp_resume_session_id is None

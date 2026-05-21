@@ -116,6 +116,13 @@ class StoredConversationMetadata(Base):
         create_json_type_decorator(dict[str, str]), nullable=True
     )
 
+    # ACP resume state — durably mirrors ACPAgent.agent_state's session id
+    # and the cwd it was created under, so the SDK can call session/load on
+    # the next sandbox launch even after a sandbox recycle has wiped the
+    # per-conversation base_state.json inside the previous sandbox.
+    acp_session_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    acp_session_cwd: Mapped[str | None] = mapped_column(String, nullable=True)
+
 
 @dataclass
 class SQLAppConversationInfoService(AppConversationInfoService):
@@ -381,6 +388,8 @@ class SQLAppConversationInfoService(AppConversationInfoService):
             ),
             public=info.public,
             tags=info.tags if info.tags else None,
+            acp_session_id=info.acp_session_id,
+            acp_session_cwd=info.acp_session_cwd,
         )
 
         await self.db_session.merge(stored)
@@ -467,6 +476,38 @@ class SQLAppConversationInfoService(AppConversationInfoService):
         # Update last_updated_at timestamp
         stored.last_updated_at = utc_now()
 
+        await self.db_session.commit()
+
+    async def update_acp_session(
+        self,
+        conversation_id: UUID,
+        acp_session_id: str | None,
+        acp_session_cwd: str | None,
+    ) -> None:
+        """Persist the ACP session id and cwd for resume after sandbox recycle.
+
+        Writes both columns even when one is ``None`` so the row reflects the
+        SDK's authoritative agent_state.  Skips the write silently when the
+        conversation row isn't visible to the current user context.
+        """
+        query = await self._secure_select()
+        query = query.where(
+            StoredConversationMetadata.conversation_id == str(conversation_id)
+        )
+        result = await self.db_session.execute(query)
+        stored = result.scalar_one_or_none()
+
+        if not stored:
+            logger.debug(
+                'Conversation %s not found or not accessible, '
+                'skipping ACP session id update',
+                conversation_id,
+            )
+            return
+
+        stored.acp_session_id = acp_session_id
+        stored.acp_session_cwd = acp_session_cwd
+        stored.last_updated_at = utc_now()
         await self.db_session.commit()
 
     async def process_stats_event(
@@ -570,6 +611,8 @@ class SQLAppConversationInfoService(AppConversationInfoService):
             sub_conversation_ids=sub_conversation_ids or [],
             public=stored.public,
             tags=stored.tags or {},
+            acp_session_id=stored.acp_session_id,
+            acp_session_cwd=stored.acp_session_cwd,
             created_at=created_at,
             updated_at=updated_at,
         )
