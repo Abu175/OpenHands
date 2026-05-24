@@ -521,13 +521,12 @@ jobs:
               if: steps.precheck.outputs.should_run != 'true'
               env:
                   ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
-                  SKIP_REASON: ${{ steps.precheck.outputs.skip_reason }}
               run: |
                   {
                     echo "## Good first issue check"
                     echo
                     echo "- Issue: #$ISSUE_NUMBER"
-                    echo "- Skipped: $SKIP_REASON"
+                    echo "- Skipped: ${{ steps.precheck.outputs.skip_reason }}"
                   } >> "$GITHUB_STEP_SUMMARY"
 
             - name: Run OpenHands good first issue conversation
@@ -661,10 +660,8 @@ jobs:
 
             - name: Summarize good first issue label action
               if: steps.precheck.outputs.should_run == 'true'
-              env:
-                  SHOULD_APPLY_LABEL: ${{ steps.parsed_result.outputs.should_apply_label }}
               run: |
-                  if [ "$SHOULD_APPLY_LABEL" = "true" ]; then
+                  if [ "${{ steps.parsed_result.outputs.should_apply_label }}" = "true" ]; then
                     echo "- Applied label: good first issue" >> "$GITHUB_STEP_SUMMARY"
                   else
                     echo "- Label not applied" >> "$GITHUB_STEP_SUMMARY"
