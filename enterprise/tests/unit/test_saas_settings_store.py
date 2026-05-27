@@ -887,13 +887,13 @@ async def test_store_and_load_llm_profiles_round_trip(
 
 
 @pytest.mark.asyncio
-async def test_load_with_null_llm_profiles_column_uses_default_factory(
+async def test_load_with_null_llm_profiles_column_seeds_default_profile(
     async_session_maker, org_with_multiple_members_fixture
 ):
-    """Rows predating the user.llm_profiles column read back as None.
-    Settings.llm_profiles is non-nullable (default_factory=LLMProfiles), so
-    load() must drop the None and let the factory produce an empty container
-    rather than crashing validation."""
+    """Rows predating the llm_profiles columns read back as None. Rather than
+    presenting an empty profiles UI on upgrade, load() seeds a "Default"
+    profile from the legacy agent_settings.llm config (mirroring the OSS
+    FileSettingsStore behaviour), with that profile marked active."""
     from sqlalchemy import update
     from storage.user import User
 
@@ -923,8 +923,10 @@ async def test_load_with_null_llm_profiles_column_uses_default_factory(
         loaded = await admin_store.load()
 
     assert loaded is not None
-    assert loaded.llm_profiles.profiles == {}
-    assert loaded.llm_profiles.active is None
+    assert set(loaded.llm_profiles.profiles.keys()) == {'Default'}
+    assert loaded.llm_profiles.active == 'Default'
+    default = loaded.llm_profiles.require('Default')
+    assert default.model == 'anthropic/claude-sonnet-4-5-20250929'
 
 
 @pytest.mark.asyncio
