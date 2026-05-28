@@ -84,5 +84,6 @@ def get_llm_metadata(
         metadata['tags'].append(f'git_provider:{git_provider}')
     if selected_branch:
         metadata['selected_branch'] = selected_branch
+        metadata['tags'].append(f'branch:{selected_branch}')
 
     return metadata

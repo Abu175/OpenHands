@@ -389,13 +389,13 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 llm_model = request_agent.llm.model
                 agent_kind = 'openhands'
 
-            conversation_tags: dict[str, str] = {}
+            conversation_tags: dict[str, str] = dict(tags)
             if request.selected_repository:
-                conversation_tags['repo'] = request.selected_repository
+                conversation_tags['repo_name'] = request.selected_repository
             if request.git_provider:
-                conversation_tags['gitprovider'] = request.git_provider.value
+                conversation_tags['git_provider'] = request.git_provider.value
             if request.selected_branch:
-                conversation_tags['branch'] = request.selected_branch
+                conversation_tags['selected_branch'] = request.selected_branch
 
             app_conversation_info = AppConversationInfo(
                 id=info.id,
@@ -1161,6 +1161,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             tags.append(f'repo:{selected_repository}')
         if selected_branch:
             metadata['selected_branch'] = selected_branch
+            tags.append(f'branch:{selected_branch}')
         if git_provider:
             provider = git_provider.value
             metadata['git_provider'] = provider
@@ -1385,7 +1386,6 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             remote_workspace: Optional remote workspace instance
             selected_repository: Optional repository name
             selected_branch: Optional selected branch name
-            git_provider: Optional git provider type
             plugins: Optional list of plugins to load
             api_secrets: Optional secrets passed directly via the API.
                 These are merged with existing secrets (from database
