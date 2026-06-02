@@ -30,6 +30,7 @@ from server.routes.org_models import (
     OrgNameExistsError,
     OrgNotFoundError,
     OrgUpdate,
+    OrphanedUserError,
     RoleNotFoundError,
 )
 from server.routes.orgs import (
@@ -1483,6 +1484,44 @@ async def test_delete_org_unauthorized(mock_app, mock_owner_role):
 
         # Assert
         assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_delete_org_other_members_would_be_orphaned(mock_app, mock_owner_role):
+    """
+    GIVEN: A multi-user org where some members other than the requester would
+           be left without any organization
+    WHEN:  DELETE /api/organizations/{org_id} is called
+    THEN:  400 Bad Request is returned listing the affected member count, and
+           the requester's account is NOT silently destroyed.
+
+    This is the multi-user safeguard: an org owner cannot delete an org if
+    doing so would orphan another member's account. Only the requester
+    themselves may be cascade-deleted as a sole-org user.
+    """
+    # Arrange
+    org_id = uuid.uuid4()
+    orphaned_user_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+
+    with (
+        patch(
+            'server.auth.authorization.get_user_org_role',
+            AsyncMock(return_value=mock_owner_role),
+        ),
+        patch(
+            'server.routes.orgs.OrgService.delete_org_with_cleanup',
+            AsyncMock(side_effect=OrphanedUserError(orphaned_user_ids)),
+        ),
+    ):
+        client = TestClient(mock_app)
+
+        # Act
+        response = client.delete(f'/api/organizations/{org_id}')
+
+        # Assert
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert '2 other user(s)' in response.json()['detail']
+        assert 'no remaining organization' in response.json()['detail']
 
 
 @pytest.fixture

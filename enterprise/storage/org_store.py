@@ -14,6 +14,7 @@ from server.constants import (
 from server.routes.org_models import (
     OrgMemberSettingsUpdate,
     OrgUpdate,
+    OrphanedUserError,
 )
 from sqlalchemy import delete, select, text
 from sqlalchemy.orm import joinedload
@@ -423,15 +424,18 @@ class OrgStore:
             return org
 
     @staticmethod
-    async def delete_org_cascade(org_id: UUID) -> Org | None:
+    async def delete_org_cascade(
+        org_id: UUID, requester_user_id: str | None = None
+    ) -> Org | None:
         """Delete organization and all associated data in cascade, including external LiteLLM cleanup.
 
-        Users that belong to the org being deleted are handled in two ways:
+        Users that belong to the org being deleted are handled in three ways:
 
         * Users with a membership in at least one other org have their
           ``current_org_id`` reassigned to one of those alternative orgs.
-        * Sole-org ("orphaned") users — whose only membership is in the org
-          being deleted — are themselves deleted in the same transaction. The
+        * If the *requester themselves* is the only orphaned user (sole member
+          of the org being deleted — the personal-org self-service case), the
+          requester's user row is cascade-deleted in the same transaction. The
           Keycloak account is left untouched, so on the user's next login
           ``UserStore.create_user`` re-onboards them as a brand-new user. The
           new ``User.id`` and ``Org.id`` are derived from the Keycloak ``sub``
@@ -439,14 +443,25 @@ class OrgStore:
           identity matches the deleted one (``User.id == Org.id ==
           UUID(keycloak.sub)``) and downstream automations that key on
           ``keycloak_user_id`` continue to resolve correctly.
+        * If any orphan is **not** the requester (i.e., a multi-user org where
+          another member has no other org), ``OrphanedUserError`` is raised
+          and the whole transaction is rolled back. The org owner must
+          transfer or remove those members before deletion can proceed —
+          we refuse to silently destroy accounts that did not consent.
 
         Args:
             org_id: UUID of the organization to delete
+            requester_user_id: Keycloak ``sub`` of the user initiating the
+                deletion. Required for the sole-orphan personal-org case;
+                when ``None`` (e.g., internal callers), any orphan triggers
+                ``OrphanedUserError``.
 
         Returns:
             Org: The deleted organization object, or None if not found
 
         Raises:
+            OrphanedUserError: If any non-requester member of the org would be
+                left without any organization by the deletion.
             Exception: If database operations or LiteLLM cleanup fail
         """
         async with a_session_maker() as session:
@@ -524,31 +539,50 @@ class OrgStore:
                     """),
                     {'org_id': str(org_id)},
                 )
-                orphaned_user_ids = [row[0] for row in orphaned_result.fetchall()]
+                orphaned_user_ids = [str(row[0]) for row in orphaned_result.fetchall()]
 
-                # 3a. Cascade-delete orphaned (sole-org) users. Their personal-org
-                # identity is preserved on re-login because UserStore.create_user
-                # derives both User.id and Org.id from the Keycloak ``sub`` claim
-                # (which is stable across logins), so a re-onboarded user receives
-                # the same UUIDs they had before. Downstream systems keyed on
+                # 3a. Partition orphans into (the requester themselves) and
+                # (everybody else). We will only cascade-delete the requester:
+                # destroying other members' accounts as a side effect of an
+                # org-delete is not consent-respecting, so for any non-requester
+                # orphan we raise and roll back the transaction.
+                other_orphans = [
+                    uid for uid in orphaned_user_ids if uid != requester_user_id
+                ]
+                if other_orphans:
+                    raise OrphanedUserError(other_orphans)
+
+                requester_orphan_ids = [
+                    uid for uid in orphaned_user_ids if uid == requester_user_id
+                ]
+
+                # 3b. Cascade-delete the requester if they are a sole-org user
+                # (personal-org self-service path). Their personal-org identity
+                # is preserved on re-login because UserStore.create_user derives
+                # both User.id and Org.id from the Keycloak ``sub`` claim (which
+                # is stable across logins), so a re-onboarded user receives the
+                # same UUIDs they had before. Downstream systems keyed on
                 # ``keycloak_user_id``/``org_id`` continue to resolve correctly.
                 #
-                # We must remove the user row BEFORE deleting the org row, because
-                # ``user.current_org_id`` is a NOT NULL FK to ``org.id``. That in
-                # turn requires releasing other inbound FKs to ``user.id`` first:
-                # ``org_invitation`` and ``org_git_claim`` cascade on ``org.id``
-                # in the DB schema, but the org row still exists at this point,
-                # so we clean those references explicitly here.
-                if orphaned_user_ids:
+                # We must remove the user row BEFORE deleting the org row,
+                # because ``user.current_org_id`` is a NOT NULL FK to
+                # ``org.id``. That in turn requires releasing other inbound
+                # FKs to ``user.id`` first: ``org_invitation`` and
+                # ``org_git_claim`` cascade on ``org.id`` in the DB schema,
+                # but the org row still exists at this point, so we clean
+                # those references explicitly here.
+                if requester_orphan_ids:
                     await session.execute(
                         delete(OrgInvitation).where(
-                            OrgInvitation.inviter_id.in_(orphaned_user_ids)
-                            | OrgInvitation.accepted_by_user_id.in_(orphaned_user_ids)
+                            OrgInvitation.inviter_id.in_(requester_orphan_ids)
+                            | OrgInvitation.accepted_by_user_id.in_(
+                                requester_orphan_ids
+                            )
                         )
                     )
                     await session.execute(
                         delete(OrgGitClaim).where(
-                            OrgGitClaim.claimed_by.in_(orphaned_user_ids)
+                            OrgGitClaim.claimed_by.in_(requester_orphan_ids)
                         )
                     )
                     # All of the orphan's memberships are for the org being
@@ -557,14 +591,14 @@ class OrgStore:
                     # the user_id FK before the user row goes away.
                     await session.execute(
                         delete(OrgMember).where(
-                            OrgMember.user_id.in_(orphaned_user_ids)
+                            OrgMember.user_id.in_(requester_orphan_ids)
                         )
                     )
                     await session.execute(
-                        delete(User).where(User.id.in_(orphaned_user_ids))
+                        delete(User).where(User.id.in_(requester_orphan_ids))
                     )
 
-                # 3b. Batch update: reassign current_org_id to an alternative org
+                # 3c. Batch update: reassign current_org_id to an alternative org
                 # for any remaining users. Orphan rows are gone at this point, so
                 # the subquery is guaranteed to return a non-null org for every
                 # row touched by the UPDATE.
