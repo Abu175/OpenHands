@@ -472,6 +472,50 @@ class OrgStore:
                 return None
 
             try:
+                # Preflight orphan check — fail fast before any writes.
+                #
+                # The orphan SELECT only reads ``user`` and ``org_member``,
+                # neither of which is modified by the org-data cleanup
+                # below, so we hoist it to the top of the transaction. If
+                # the check fails we raise immediately and the rollback
+                # has essentially no write work to undo.
+                #
+                # Running it inside the transaction (rather than as a
+                # separate pre-flight call before opening the session) is
+                # deliberate: it ensures the orphan computation shares the
+                # same snapshot/locks as the destructive writes below, so
+                # another session cannot create a new orphan between
+                # check-and-act.
+                orphaned_result = await session.execute(
+                    text("""
+                        SELECT u.id
+                        FROM "user" u
+                        WHERE u.current_org_id = :org_id
+                        AND NOT EXISTS (
+                            SELECT 1 FROM org_member om
+                            WHERE om.user_id = u.id AND om.org_id != :org_id
+                        )
+                    """),
+                    {'org_id': str(org_id)},
+                )
+                orphaned_user_ids = [str(row[0]) for row in orphaned_result.fetchall()]
+
+                # Split the orphaned users into the requester and everyone
+                # else. Only the requester is cascade-deleted: by calling
+                # DELETE on their own org they've consented to losing their
+                # account. Other members have not consented, so if any
+                # non-requester would be orphaned we raise OrphanedUserError
+                # and let the transaction roll back.
+                other_orphans = [
+                    uid for uid in orphaned_user_ids if uid != requester_user_id
+                ]
+                if other_orphans:
+                    raise OrphanedUserError(other_orphans)
+
+                requester_orphan_ids = [
+                    uid for uid in orphaned_user_ids if uid == requester_user_id
+                ]
+
                 # 1. Delete conversation data for organization conversations
                 await session.execute(
                     text("""
@@ -525,39 +569,13 @@ class OrgStore:
                     {'org_id': str(org_id)},
                 )
 
-                # 3. Handle users with this as current_org_id BEFORE deleting memberships
-                # Single query to find orphaned users (those with no alternative org)
-                orphaned_result = await session.execute(
-                    text("""
-                        SELECT u.id
-                        FROM "user" u
-                        WHERE u.current_org_id = :org_id
-                        AND NOT EXISTS (
-                            SELECT 1 FROM org_member om
-                            WHERE om.user_id = u.id AND om.org_id != :org_id
-                        )
-                    """),
-                    {'org_id': str(org_id)},
-                )
-                orphaned_user_ids = [str(row[0]) for row in orphaned_result.fetchall()]
+                # 3. Handle users with this as current_org_id BEFORE deleting
+                # memberships. The orphan partition was computed in the
+                # preflight check at the top of this try block;
+                # ``requester_orphan_ids`` is set iff the requester is a
+                # sole-org member of this org.
 
-                # 3a. Split the orphaned users into the requester and
-                # everyone else. Only the requester is cascade-deleted: by
-                # calling DELETE on their own org they've consented to losing
-                # their account. Other members have not consented, so if any
-                # non-requester would be orphaned we raise OrphanedUserError
-                # and let the transaction roll back.
-                other_orphans = [
-                    uid for uid in orphaned_user_ids if uid != requester_user_id
-                ]
-                if other_orphans:
-                    raise OrphanedUserError(other_orphans)
-
-                requester_orphan_ids = [
-                    uid for uid in orphaned_user_ids if uid == requester_user_id
-                ]
-
-                # 3b. Cascade-delete the requester if they are a sole-org user
+                # 3a. Cascade-delete the requester if they are a sole-org user
                 # (personal-org self-service path). Their personal-org identity
                 # is preserved on re-login because UserStore.create_user derives
                 # both User.id and Org.id from the Keycloak ``sub`` claim (which
@@ -599,7 +617,7 @@ class OrgStore:
                         delete(User).where(User.id.in_(requester_orphan_ids))
                     )
 
-                # 3c. Batch update: reassign current_org_id to an alternative org
+                # 3b. Batch update: reassign current_org_id to an alternative org
                 # for any remaining users. Orphan rows are gone at this point, so
                 # the subquery is guaranteed to return a non-null org for every
                 # row touched by the UPDATE.
