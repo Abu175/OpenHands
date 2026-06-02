@@ -30,7 +30,6 @@ from server.routes.org_models import (
     OrgNameExistsError,
     OrgNotFoundError,
     OrgUpdate,
-    OrphanedUserError,
     RoleNotFoundError,
 )
 from server.routes.orgs import (
@@ -1484,38 +1483,6 @@ async def test_delete_org_unauthorized(mock_app, mock_owner_role):
 
         # Assert
         assert response.status_code == status.HTTP_403_FORBIDDEN
-
-
-@pytest.mark.asyncio
-async def test_delete_org_orphaned_users(mock_app, mock_owner_role):
-    """
-    GIVEN: Deleting org would leave users without any organization
-    WHEN: DELETE /api/organizations/{org_id} is called
-    THEN: 400 Bad Request error is returned with user count in message
-    """
-    # Arrange
-    org_id = uuid.uuid4()
-    orphaned_user_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
-
-    with (
-        patch(
-            'server.auth.authorization.get_user_org_role',
-            AsyncMock(return_value=mock_owner_role),
-        ),
-        patch(
-            'server.routes.orgs.OrgService.delete_org_with_cleanup',
-            AsyncMock(side_effect=OrphanedUserError(orphaned_user_ids)),
-        ),
-    ):
-        client = TestClient(mock_app)
-
-        # Act
-        response = client.delete(f'/api/organizations/{org_id}')
-
-        # Assert
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert '2 user(s)' in response.json()['detail']
-        assert 'no remaining organization' in response.json()['detail']
 
 
 @pytest.fixture

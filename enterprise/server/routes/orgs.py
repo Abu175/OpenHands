@@ -36,7 +36,6 @@ from server.routes.org_models import (
     OrgPage,
     OrgResponse,
     OrgUpdate,
-    OrphanedUserError,
     RoleNotFoundError,
 )
 from server.services.org_app_settings_service import (
@@ -660,19 +659,6 @@ async def delete_org(
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=str(e),
-        )
-    except OrphanedUserError as e:
-        logger.warning(
-            'Cannot delete organization: users would be orphaned',
-            extra={
-                'user_id': user_id,
-                'org_id': str(org_id),
-                'orphaned_users': e.user_ids,
-            },
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
     except OrgDatabaseError as e:
