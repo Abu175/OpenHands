@@ -541,11 +541,12 @@ class OrgStore:
                 )
                 orphaned_user_ids = [str(row[0]) for row in orphaned_result.fetchall()]
 
-                # 3a. Partition orphans into (the requester themselves) and
-                # (everybody else). We will only cascade-delete the requester:
-                # destroying other members' accounts as a side effect of an
-                # org-delete is not consent-respecting, so for any non-requester
-                # orphan we raise and roll back the transaction.
+                # 3a. Split the orphaned users into the requester and
+                # everyone else. Only the requester is cascade-deleted: by
+                # calling DELETE on their own org they've consented to losing
+                # their account. Other members have not consented, so if any
+                # non-requester would be orphaned we raise OrphanedUserError
+                # and let the transaction roll back.
                 other_orphans = [
                     uid for uid in orphaned_user_ids if uid != requester_user_id
                 ]
