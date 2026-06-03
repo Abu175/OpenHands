@@ -1,15 +1,10 @@
-import { useParams } from "react-router";
+﻿import { useParams } from "react-router";
 import { useConfig } from "#/hooks/query/use-config";
 import { useUserConversation } from "#/hooks/query/use-user-conversation";
 
-const APP_TITLE_OSS = "OpenHands";
-const APP_TITLE_SAAS = "OpenHands Cloud";
+const APP_TITLE_OSS = "OpenWork";
+const APP_TITLE_SAAS = "OpenWork Cloud";
 
-/**
- * Hook that returns the appropriate document title based on app_mode and current route.
- * - For conversation pages: "Conversation Title | OpenHands" or "Conversation Title | OpenHands Cloud"
- * - For other pages: "OpenHands" or "OpenHands Cloud"
- */
 export const useAppTitle = () => {
   const { data: config } = useConfig();
   const { conversationId } = useParams<{ conversationId: string }>();
@@ -19,7 +14,7 @@ export const useAppTitle = () => {
   const conversationTitle = conversation?.title;
 
   if (conversationId && conversationTitle) {
-    return `${conversationTitle} | ${appTitle}`;
+    return \ | \;
   }
 
   return appTitle;
