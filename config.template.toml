@@ -1,4 +1,4 @@
-###################### OpenHands Configuration Example ######################
+﻿###################### OpenWork Configuration Example ######################
 #
 # All settings have default values, so you only need to uncomment and
 # modify what you want to change
@@ -392,3 +392,4 @@ type = "noop"
 # - "noop_router" (default): No routing, always uses primary LLM
 # - "multimodal_router": A router that switches between primary and secondary models, depending on whether the input is multimodal or not
 #router_name = "noop_router"
+
