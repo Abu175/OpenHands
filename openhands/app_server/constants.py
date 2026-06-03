@@ -1,4 +1,4 @@
-"""Constants for the OpenHands App Server.
+﻿"""Constants for the OpenWork App Server.
 
 This module contains constants that are used across the app server,
 including security-related configurations for secret name validation.
@@ -167,3 +167,4 @@ def validate_secrets_dict(secrets: Mapping[str, object] | None) -> None:
                 f'{MAX_API_SECRET_VALUE_LENGTH} bytes (got {value_bytes}). '
                 f'Configure via OH_MAX_API_SECRET_VALUE_LENGTH.'
             )
+
