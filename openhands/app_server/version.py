@@ -1,7 +1,7 @@
-import os
+﻿import os
 from pathlib import Path
 
-__package_name__ = 'openhands_ai'
+__package_name__ = 'openwork_ai'
 
 
 def get_version():
