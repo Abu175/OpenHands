@@ -1593,16 +1593,28 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
     ) -> StartConversationRequest:
         """Build a StartConversationRequest for ACP agent conversations.
 
-        Unlike the LLM path, ACP agents run as separate subprocesses; we pass
-        credentials via environment variables rather than injecting an LLM object.
+        Unlike the LLM path, ACP agents run as separate subprocesses; the
+        provider credentials reach the subprocess as environment variables
+        rather than via an injected LLM object.
 
-        User secrets (Secrets panel + git provider tokens) flow through two
-        complementary channels: they're rendered into the ACP prompt as a
-        ``<CUSTOM_SECRETS>`` block via ``AgentContext.secrets`` (so the agent
-        knows the names) and also pre-exported as environment variables on
-        the ACP subprocess via ``acp_env`` (so plain CLI commands like
-        ``gh`` / ``aws`` / ``git`` pick them up from env without the agent
-        having to manually export them).
+        Both the provider credentials (the UI-saved ``llm.api_key`` /
+        ``base_url``) and user secrets (Secrets panel + git provider tokens)
+        flow through the single ``AgentContext.secrets`` channel — the
+        cipher-protected channel that rides the encrypted ``request.secrets``
+        boundary. ``ACPAgentSettings.create_agent()`` folds the provider creds
+        (keyed by the provider's env-var names) into ``agent_context.secrets``,
+        and the SDK gap-fills the values into the subprocess env at launch.
+
+        NOTE: this relies on ``create_agent()`` routing the provider creds to
+        ``agent_context.secrets`` instead of ``acp_env`` — behaviour added in
+        software-agent-sdk #3464. On an SDK *before* that change,
+        ``create_agent()`` folds the creds into ``acp_env`` (the persist-unsafe
+        channel that SaaS settings stores redact to ``**********``), so this
+        code is correct **only once ``openhands-sdk`` is pinned to a release
+        containing #3464**. Until then, the interim workaround in
+        OpenHands#14620 (route the creds via ``agent_context.secrets`` in this
+        method and strip them off the dummy ``llm``) keeps them off ``acp_env``
+        on the current pin. See OpenHands/agent-canvas#1039.
 
         Args:
             sandbox: Sandbox information
@@ -1640,12 +1652,13 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         acp_settings = user.agent_settings  # already verified to be ACPAgentSettings
         assert isinstance(acp_settings, ACPAgentSettings)
 
-        # Pass user secrets via AgentContext. The SDK renders them as a
-        # <CUSTOM_SECRETS> block in the ACP prompt (so the agent knows the
-        # names) and ``ACPAgent._start_acp_server`` gap-fills any that
-        # aren't already in ``acp_env`` into the subprocess env at launch
-        # time — preserving the ``acp_env > provider env > secrets``
-        # precedence end-to-end. We pass ``SecretSource`` objects through
+        # Pass user secrets via AgentContext and let create_agent() fold the
+        # ACP provider creds (llm.api_key / base_url) into the same
+        # agent_context.secrets channel — keyed by the provider's env-var
+        # names — instead of acp_env (software-agent-sdk #3464; requires an
+        # openhands-sdk pin that includes it). The SDK renders the names as a
+        # <CUSTOM_SECRETS> block in the ACP prompt and gap-fills the values
+        # into the subprocess env at launch. We pass ``SecretSource`` objects
         # verbatim; resolving them here (with ``source.get_value()``) would
         # eagerly hit the auth service for every ``LookupSecret`` on every
         # conversation start, from the wrong process.
