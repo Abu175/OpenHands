@@ -1,11 +1,4 @@
-import {
-  Links,
-  Meta,
-  MetaFunction,
-  Outlet,
-  Scripts,
-  ScrollRestoration,
-} from "react-router";
+﻿import { Links, Meta, MetaFunction, Outlet, Scripts, ScrollRestoration } from "react-router";
 import "./tailwind.css";
 import "./index.css";
 import React from "react";
@@ -33,14 +26,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export const meta: MetaFunction = () => [
-  { title: "OpenHands" },
+  { title: "OpenWork" },
   { name: "description", content: "Let's Start Building!" },
 ];
 
 export default function App() {
-  // Handle invitation token cleanup when invitation flow completes
-  // This runs on all pages to catch redirects from auth callback
   useInvitation();
-
   return <Outlet />;
 }
